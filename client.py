@@ -5,7 +5,7 @@ import logging
 
 import Pyro.core
 
-from dr import *
+from server import *
 
 def main():
     usage = """
@@ -18,13 +18,21 @@ def main():
     
     (options, args) = parser.parse_args()
     
+    # connect to the manager (single threaded)
     manager = Pyro.core.getProxyForURI("PYROLOC://%s:%s/manager" % (options.host, options.port))
+    # get the next replica URI?
+    replica_uri = manager.get_next_replica_uri()
     
-    replica = manager.get_next_replica()
-    if replica:
-        manager.set_replica_status(replica, Replica.RUNNING)
+    if replica_uri is not None:
+        replica = replica_uri.getAttrProxy()
+        
+        print "Got replica:", replica
+        replica.status = Replica.RUNNING
+        print replica
+        # manager.set_replica_status(replica, Replica.RUNNING)
         replica.run()
-        manager.set_replica_status(replica, Replica.FINISHED)
+        replica.status = Replica.FINISHED
+        # manager.set_replica_status(replica, Replica.FINISHED)
     else:
         print "Nothing to run!"
         
