@@ -4,7 +4,6 @@ import os
 import optparse
 import logging
 import subprocess
-import shutil
 import tempfile
 import time
 import datetime
@@ -12,10 +11,9 @@ from xml.dom.minidom import parseString
 from string import Template
 from configobj import ConfigObj
 
-from tables import *
-
 import Pyro.core
 
+# setup logging
 log = logging.getLogger("server")
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 ch = logging.StreamHandler()
@@ -25,7 +23,6 @@ log.addHandler(ch)
 
 # TODO:
 #   - keep track of state with sqlite or serialize manager object
-#   - settings file
 #   - get the client to run a specific job script
 #   - resubmit the server when walltime is low (some kind of timer?)
 #   - DR algorithm for getting next replica to run
@@ -80,7 +77,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
             raise Exception('No replicas found in config file... exiting!')
                 
         self.submit_all_replicas()
-        
+     
     def submit_all_replicas(self):
         """
         Start by submitting a job per replica.
@@ -94,6 +91,10 @@ class Manager(Pyro.core.SynchronizedObjBase):
                 self.jobs[j.id] = j
             # sleep to prevent overloading the server
             time.sleep(1)
+    
+    def save_state(self):
+        # TODO
+        pass
     
     def show_replicas(self):
         """ Print the status of all replicas """
@@ -211,17 +212,16 @@ python ${pydr_client_path} -l ${pydr_server} -p ${pydr_port} -j $PBS_JOBID
         
     def make_submit_script(self, options={}):
         s = Template(self.DEFAULT_SUBMIT_SCRIPT_TEMPLATE)
-            
         defaults = {    'nodes': '1',
                         'ppn': '8',
                         'walltime': '86400',
                         'extra': ['os=centos53computeA'],
                         'jobname': self.jobname(),
                         'mpiflags': '',
+                        'job_dir': os.path.abspath(os.path.dirname(self.manager.config_file)),
                         'pydr_client_path': os.path.abspath(os.path.dirname(__file__)),
-                        'pydr_server': 'localhost',
-                        'pydr_port': '7766',
-                        'job_dir': '/tmp',
+                        'pydr_server': self.manager.daemon.hostname,
+                        'pydr_port': self.manager.daemon.port,
                     }
         
         defaults.update(options)
@@ -264,7 +264,7 @@ python ${pydr_client_path} -l ${pydr_server} -p ${pydr_port} -j $PBS_JOBID
         # print >>f, """
         # 
         # """
-        # print self.make_submit_script()
+        #print self.make_submit_script()
 
         log.info('Submit script file: %s' % f_abspath)
 
