@@ -7,12 +7,28 @@ import subprocess
 import shutil
 import tempfile
 import time
+import datetime
 from xml.dom.minidom import parseString
 from string import Template
+from configobj import ConfigObj
 
 from tables import *
 
 import Pyro.core
+
+log = logging.getLogger("server")
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+ch = logging.StreamHandler()
+log.setLevel(logging.DEBUG)
+ch.setFormatter(formatter)
+log.addHandler(ch)
+
+# TODO:
+#   - keep track of state with sqlite or serialize manager object
+#   - settings file
+#   - get the client to run a specific job script
+#   - resubmit the server when walltime is low (some kind of timer?)
+#   - DR algorithm for getting next replica to run
 
 def main():
     usage = """
@@ -20,24 +36,28 @@ def main():
     """
     
     parser = optparse.OptionParser(usage)
-    # parser.add_option("-o", dest="h5_filename", default="analysis.h5", help="Output analysis file [default: %default]")    
+    parser.add_option("-c", "--config", dest="config_file", default="config.ini", help="Config file [default: %default]")    
     (options, args) = parser.parse_args()
     
     # run the Manager in Pyro
     Pyro.core.initServer()
     daemon = Pyro.core.Daemon()
     
-    uri = daemon.connect(Manager(daemon), "manager")
+    uri = daemon.connect(Manager(options.config_file, daemon), "manager")
     print "The daemon runs on port:",daemon.port
     print "The object's uri is:",uri
-    daemon.requestLoop()
+    
+    try:
+        daemon.requestLoop()
+    finally:
+        daemon.shutdown(True)
 
 class Manager(Pyro.core.SynchronizedObjBase):           
     """
     The Manager class is the class shared by Pyro. It handles jobs, nodes and replicas.
     """
     
-    def __init__(self, daemon):
+    def __init__(self, config_file, daemon):
         Pyro.core.SynchronizedObjBase.__init__(self)
         
         self.daemon = daemon
@@ -45,13 +65,20 @@ class Manager(Pyro.core.SynchronizedObjBase):
         self.jobs = {}
         # replicas[<replica id>] = Replica()
         self.replicas = {}
+        self.config_file = config_file
+        self.config = ConfigObj(self.config_file)
         
-        # TODO: load settings
-        for i in range(10):
-            r = Replica(id=i, uri=None)
-            r.uri = self.daemon.connect(r, 'replica/%d' % r.id)
+        # configs: system, server, jobs, simulation, replicas
+        
+        for r_id, r_config in self.config['replicas'].items():
+            log.info('Adding replica: %s -> %s' % (r_id, r_config))
+            r = Replica(id=r_id, options=r_config)
+            r.uri = self.daemon.connect(r, 'replica/%s' % r.id)
             self.replicas[r.id] = r
         
+        if not len(self.replicas.items()):
+            raise Exception('No replicas found in config file... exiting!')
+                
         self.submit_all_replicas()
         
     def submit_all_replicas(self):
@@ -60,18 +87,18 @@ class Manager(Pyro.core.SynchronizedObjBase):
         """
 
         for r in self.replicas.values():
-            # TODO: pass settings
             j = Job(self)
             j.submit()
             # job id is available after submission
-            self.jobs[j.id] = j
+            if j.id:
+                self.jobs[j.id] = j
             # sleep to prevent overloading the server
             time.sleep(1)
     
     def show_replicas(self):
         """ Print the status of all replicas """
         for r in self.replicas.values():
-            logging.info('%s' % r)
+            log.info('%s' % r)
      
     def set_replica_status(self, replica, status):
         r = self.replicas[replica.id].status = status
@@ -80,23 +107,21 @@ class Manager(Pyro.core.SynchronizedObjBase):
         """
         When a client is run, it gets a replica URI by calling this function
         """
-        logging.info('Job just connected to server!')
+        log.info('Job just connected to server!')
         self.show_replicas()
         for r in self.replicas.values():
             if r.status == Replica.READY:
-                logging.info('Replica ready: %s' % r)
-                
+                log.info('Replica ready: %s' % r)
                 if jobid and jobid in self.jobs.keys():
-                    logging.info('Associating job %s with replica %s' % (jobid, r.id))
+                    log.info('Associating job %s with replica %s' % (jobid, r.id))
                     self.jobs[jobid].replica = r
                     r.job = self.jobs[jobid]
                 else:
-                    logging.warning('Job sent invalid job id %s, will not associate it with replica' % jobid)
-                
+                    log.warning('Job sent invalid job id %s, will not associate it with replica' % jobid)
                 r.status = Replica.SENT
                 return r.uri
                 # return Pyro.core.PyroURI("PYROLOC://%s:%s/replica/%d" % (self.daemon.host, self.daemon.port, r.id))
-        logging.warning('No replicas ready to run')
+        log.warning('No replicas ready to run')
         return None
 
 # Subclass Replica to handle different simulation packages and systems?
@@ -105,29 +130,17 @@ class Replica(Pyro.core.ObjBase):
     The Replica class represents an individual replica that is run on a node.
     It contains all the information necessary for a new job to run a replica on a node.
 
-    Original struct replica_struct in DR:
-        char status;
-    	float w;
-    	float w_nominal;
-    	float w_start;
-    	float w2_nominal;
-    	float w_sorted;
-    	float force;
-    	unsigned int sequence_number;
     	unsigned int sample_count;
     	unsigned int sampling_runs;
     	unsigned int sampling_steps;
     	double cancellation_accumulator[2];
     	unsigned short cancellation_count;
     	float cancellation_energy;
-    	unsigned int last_activity_time;
-    	unsigned int start_time_on_current_node;
     	struct buffer_struct restart;
     	struct atom_struct *atom;
     	unsigned int *presence;
     	char vREfile[500];
     	int nodeSlot;
-
     """
 
     # Status
@@ -137,14 +150,19 @@ class Replica(Pyro.core.ObjBase):
     FINISHED = 'finished'   # replica finished running
     SENT = 'sent'           # replica sent to a client
 
-    def __init__(self, id, uri):
+    def __init__(self, id, options={}):
         Pyro.core.ObjBase.__init__(self)
         
         self.id = id
         self.status = self.READY
-        self.uri = uri
+        self.uri = None
         # current job running this replica
         self.job = None
+        self.start_time = None
+        self.end_time = None
+        
+        # settings will come in **kwargs
+        print options
 
     def __repr__(self):
         return '<Replica %s:%s>' % (str(self.id), self.status)
@@ -152,8 +170,13 @@ class Replica(Pyro.core.ObjBase):
     def run(self):
         """ The actual code that runs the replica on the client node """
         print 'Running replica %d' % self.id
+        self.start_time = datetime.datetime.now()
+        self.end_time = None
+        # TODO: what to do here??
+        
         return_code = subprocess.call(['sleep', '3'], 0, None, None)
         print 'Replica %s finished' % str(self.id)
+        self.end_time = datetime.datetime.now()
         return return_code
 
 class Job(object):
@@ -166,7 +189,6 @@ class Job(object):
 #PBS -l nodes=${nodes}:ib:ppn=${ppn},walltime=${walltime},${extra}
 #PBS -N ${jobname}
 
-JOB_START_TIME=`date +%s`
 MPIFLAGS="${mpiflags}"
 
 # $PBS_O_WORKDIR
@@ -174,7 +196,8 @@ MPIFLAGS="${mpiflags}"
 
 cd $job_dir
 
-python ${pydr_path}/client.py -l ${pydr_server} -p ${pydr_port} -j $PBS_JOBID
+python ${pydr_client_path} -l ${pydr_server} -p ${pydr_port} -j $PBS_JOBID
+
 """
 
     def __init__(self, manager):
@@ -191,11 +214,11 @@ python ${pydr_path}/client.py -l ${pydr_server} -p ${pydr_port} -j $PBS_JOBID
             
         defaults = {    'nodes': '1',
                         'ppn': '8',
-                        'walltime': '1:00:00',
+                        'walltime': '86400',
                         'extra': ['os=centos53computeA'],
                         'jobname': self.jobname(),
                         'mpiflags': '',
-                        'pydr_path': os.path.dirname(__file__),
+                        'pydr_client_path': os.path.abspath(os.path.dirname(__file__)),
                         'pydr_server': 'localhost',
                         'pydr_port': '7766',
                         'job_dir': '/tmp',
@@ -207,7 +230,19 @@ python ${pydr_path}/client.py -l ${pydr_server} -p ${pydr_port} -j $PBS_JOBID
             defaults['extra'] = ','+','.join(defaults['extra'])
         else:
             defaults['extra'] = ''
-                
+        defaults['pydr_client_path'] = os.path.join(defaults['pydr_client_path'], 'client.py')
+        
+        # have to format walltime from seconds to HH:MM:SS
+        # TODO: this is horrible... I couldn't figure out how to get this done properly with python
+        t = datetime.timedelta(seconds=int(defaults['walltime']))
+        if t.days > 0:
+            hours = int(str(t).split(' ')[2].split(':')[0]) + (t.days*24)
+            mins = str(t).split(' ')[2].split(':')[1]
+            secs = str(t).split(' ')[2].split(':')[2]
+            defaults['walltime'] = '%s:%s:%s' % (str(hours), mins, secs)
+        else:
+            defaults['walltime'] = str(t)
+        
         return s.safe_substitute(defaults)
     
     # Note: PBS-specific code
@@ -216,41 +251,41 @@ python ${pydr_path}/client.py -l ${pydr_server} -p ${pydr_port} -j $PBS_JOBID
     def submit(self):
         """ Submit a job using qsub """
         
-        logging.info('Submitting job...')
+        log.info('Submitting job...')
         # note: client will send the jobid back to server to associate a replica with a job
         
         # $PBS_JOBID
         # $PBS_O_WORKDIR
         qsub = 'qsub'
 
-        (f, f_abspath) = tempfile.mkstemp()
-        f.write(self.make_submit_script)
+        (fd, f_abspath) = tempfile.mkstemp()
+        os.write(fd, self.make_submit_script())
         # print >>f, job_string
         # print >>f, """
         # 
         # """
-        f.close()
+        # print self.make_submit_script()
 
-        logging.info('Submit script file: %s' % f_abspath)
+        log.info('Submit script file: %s' % f_abspath)
 
         process = subprocess.Popen(qsub+" "+f_abspath, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         returncode = process.returncode
         (out, err) = process.communicate()
-        logging.info('Job submit stdout: %s' % out)
-        logging.info('Job submit stderr: %s' % err)
+        log.info('Job submit stdout: %s' % out)
+        log.info('Job submit stderr: %s' % err)
         
         # qsub returns "<job_id>.gpc-sched"
         try:
-            self.id = message.split('.')[0]
+            self.id = out.split('.')[0]
             # if this fails, the job id is invalid
             int(jobid)
         except:
-            logging.error('No jobid found in qsub output: %s' % message)
+            log.error('No jobid found in qsub output: %s' % out)
             self.id = None
 
     def get_job_properties(self):
         if not self.id:
-            logging.error('Cannot get job properties with unknown job id')
+            log.error('Cannot get job properties with unknown job id')
             return None
         
         process = subprocess.Popen('checkjob --format=XML %s' % (self.id,), shell=True, stdout=PIPE, stderr=PIPE)
@@ -280,10 +315,10 @@ python ${pydr_path}/client.py -l ${pydr_server} -p ${pydr_port} -j $PBS_JOBID
 
     def cancel_job(self):
         if not self.id:
-            logging.error('Cannot cancel job with unknown job id')
+            log.error('Cannot cancel job with unknown job id')
             return
         else:
-            logging.info('Cancelling job %s' % self.id)
+            log.info('Cancelling job %s' % self.id)
         
         process = subprocess.Popen('qdel %s' % (self.id,), shell=True, stdout=PIPE, stderr=PIPE)
         (out,err) = process.communicate()

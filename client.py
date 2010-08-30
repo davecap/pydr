@@ -28,7 +28,7 @@ def main():
     while (1):
         try:
             # connect to manager, give it our jobid if we have one to associate the replica
-            replica_uri = manager.get_next_replica_uri(jobid)
+            replica_uri = manager.get_next_replica_uri(options.jobid)
         except ProtocolError:
             logging.warning("Connection to manager failed, retrying...")
             time.sleep(2)
@@ -45,10 +45,8 @@ def main():
         replica = replica_uri.getAttrProxy()
         logging.info("Got replica %s" % replica)
         replica.status = Replica.RUNNING
-        # manager.set_replica_status(replica, Replica.RUNNING)
         replica.run()
         replica.status = Replica.FINISHED
-        # manager.set_replica_status(replica, Replica.FINISHED)
     else:
         logging.error("Nothing to run!")
         
