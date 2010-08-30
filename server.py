@@ -40,12 +40,22 @@ def main():
     Pyro.core.initServer()
     daemon = Pyro.core.Daemon()
     
-    uri = daemon.connect(Manager(options.config_file, daemon), "manager")
+    manager = Manager(options.config_file, daemon)
+    uri = daemon.connect(manager, "manager")
+    manager.submit_all_replicas()
+    
     print "The daemon runs on port:",daemon.port
     print "The object's uri is:",uri
     
+    start_time = datetime.datetime.now()
+    
     try:
-        daemon.requestLoop()
+        while 1:
+            daemon.handleRequests(10.0)
+            current_time = datetime.datetime.now()
+            # manager.submit_new_server()
+            # time_since_start = current_time - start_time
+            # if nearing walltime then submit a new manager
     finally:
         daemon.shutdown(True)
 
@@ -75,9 +85,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
         
         if not len(self.replicas.items()):
             raise Exception('No replicas found in config file... exiting!')
-                
-        self.submit_all_replicas()
-     
+         
     def submit_all_replicas(self):
         """
         Start by submitting a job per replica.
