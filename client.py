@@ -2,8 +2,10 @@
 
 import optparse
 import logging
+import time
 
 import Pyro.core
+from Pyro.errors import ProtocolError
 
 from server import *
 
@@ -18,23 +20,36 @@ def main():
     
     (options, args) = parser.parse_args()
     
-    # connect to the manager (single threaded)
+    # get manager URI
     manager = Pyro.core.getProxyForURI("PYROLOC://%s:%s/manager" % (options.host, options.port))
-    # get the next replica URI?
-    replica_uri = manager.get_next_replica_uri()
+    
+    tries = 3
+    while (1):
+        try:
+            # connect to manager
+            replica_uri = manager.get_next_replica_uri()
+        except ProtocolError:
+            logging.warning("Connection to manager failed, retrying...")
+            time.sleep(2)
+            tries -= 1
+            if not tries:
+                logging.error("Connection to manager failed, quitting!")
+                return -1
+        else:
+            logging.info("Connected to manager")
+            break
     
     if replica_uri is not None:
         replica = replica_uri.getAttrProxy()
         
-        print "Got replica:", replica
+        logging.info("Got replica %s" % replica)
         replica.status = Replica.RUNNING
-        print replica
         # manager.set_replica_status(replica, Replica.RUNNING)
         replica.run()
         replica.status = Replica.FINISHED
         # manager.set_replica_status(replica, Replica.FINISHED)
     else:
-        print "Nothing to run!"
+        logging.error("Nothing to run!")
         
         
 if __name__=='__main__':
