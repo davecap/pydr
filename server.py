@@ -1,10 +1,14 @@
 #!/usr/bin/python
 
+import os
 import optparse
 import logging
 import subprocess
 import shutil
 import tempfile
+import time
+from xml.dom.minidom import parseString
+
 from tables import *
 
 import Pyro.core
@@ -36,52 +40,62 @@ class Manager(Pyro.core.SynchronizedObjBase):
         Pyro.core.SynchronizedObjBase.__init__(self)
         
         self.daemon = daemon
+        # jobs[<job id>] = Job()
+        self.jobs = {}
+        # replicas[<replica id>] = Replica()
+        self.replicas = {}
         
-        self.jobs = []
-        self.replicas = []
         # TODO: load settings
         for i in range(10):
             r = Replica(id=i, uri=None)
             r.uri = self.daemon.connect(r, 'replica/%d' % r.id)
-            self.replicas.append(r)
-        self.start()
-    
-    def show_replicas(self):
-        for r in self.replicas:
-            print r
+            self.replicas[r.id] = r
         
-    def get_next_replica_uri(self):
-        """
-        When a client is run, it gets a replica to run by calling this function
-        """
-        print "Job just connected to server!"
+        self.submit_all_replicas()
         
-        self.show_replicas()
-        
-        for r in self.replicas:
-            if r.status == Replica.READY:
-                print "Got a replica to run: %s" % r
-                r.status = Replica.SENT
-                return r.uri
-                # return Pyro.core.PyroURI("PYROLOC://%s:%s/replica/%d" % (self.daemon.host, self.daemon.port, r.id))
-        print 'No replicas ready to run'
-        return None
-     
-    def set_replica_status(self, replica, status):
-        for r in self.replicas:
-            if r.id == replica.id:
-                r.status = status
-       
-    def start(self):
+    def submit_all_replicas(self):
         """
         Start by submitting a job per replica.
         """
-        
-        for r in self.replicas:
+
+        for r in self.replicas.values():
             j = Job(self)
-            self.jobs.append(j)
             j.submit()
+            # job id is available after submission
+            self.jobs[j.id] = j
             # sleep to prevent overloading the server
+            time.sleep(1)
+    
+    def show_replicas(self):
+        """ Print the status of all replicas """
+        for r in self.replicas.values():
+            logging.info('%s' % r)
+     
+    def set_replica_status(self, replica, status):
+        r = self.replicas[replica.id].status = status
+
+    def get_next_replica_uri(self, jobid):
+        """
+        When a client is run, it gets a replica URI by calling this function
+        """
+        logging.info('Job just connected to server!')
+        self.show_replicas()
+        for r in self.replicas.values():
+            if r.status == Replica.READY:
+                logging.info('Replica ready: %s' % r)
+                
+                if jobid and jobid in self.jobs.keys():
+                    logging.info('Associating job %s with replica %s' % (jobid, r.id))
+                    self.jobs[jobid].replica = r
+                    r.job = self.jobs[jobid]
+                else:
+                    logging.warning('Job sent invalid job id %s, will not associate it with replica' % jobid)
+                
+                r.status = Replica.SENT
+                return r.uri
+                # return Pyro.core.PyroURI("PYROLOC://%s:%s/replica/%d" % (self.daemon.host, self.daemon.port, r.id))
+        logging.warning('No replicas ready to run')
+        return None
 
 # Subclass Replica to handle different simulation packages and systems?
 class Replica(Pyro.core.ObjBase):
@@ -114,11 +128,12 @@ class Replica(Pyro.core.ObjBase):
 
     """
 
-    ERROR = 'error'
-    RUNNING = 'running'
-    READY = 'ready'
-    FINISHED = 'finished'
-    SENT = 'sent' # replica sent to a client
+    # Status
+    ERROR = 'error'         # replica sent an error
+    RUNNING = 'running'     # replica running
+    READY = 'ready'         # replica is waiting to run
+    FINISHED = 'finished'   # replica finished running
+    SENT = 'sent'           # replica sent to a client
 
     def __init__(self, id, uri):
         Pyro.core.ObjBase.__init__(self)
@@ -126,17 +141,18 @@ class Replica(Pyro.core.ObjBase):
         self.id = id
         self.status = self.READY
         self.uri = uri
+        # current job running this replica
+        self.job = None
 
     def __repr__(self):
-        return '<Replica %d:%s>' % (self.id, self.status)
-
+        return '<Replica %s:%s>' % (str(self.id), self.status)
+    
     def run(self):
         """ The actual code that runs the replica on the client node """
         print 'Running replica %d' % self.id
         return_code = subprocess.call(['sleep', '3'], 0, None, None)
-        print 'Replica %d finished' % self.id
+        print 'Replica %s finished' % str(self.id)
         return return_code
-
 
 class Job(object):
     """
@@ -150,14 +166,88 @@ class Job(object):
 
     def submit(self):
         """ Submit the job to a node by using qsub """
-        print 'Submitting job...'
+        logging.info('Submitting job...')
+        # note: client will send the jobid back to server to associate a replica with a job
+        
+        # $PBS_JOBID
+        # $PBS_O_WORKDIR
 
-    def status(self):
-        """ Get the status of a job. Will determine Node and Replica information if possible """
-        if self.replica:
-            return self.replica.status
+    # def status(self):
+    #     """ Get the status of a job. Will determine Node and Replica information if possible """
+    #     if self.replica:
+    #         return self.replica.status
+    #     else:
+    #         return 'No replica'
+
+    # Note: PBS-specific code
+    # TODO: extending this in the future to allow different queue systems
+    
+    def submit_job_string(self, job_string):
+        """ Submit a job from a string using qsub """
+
+        qsub = 'qsub'
+
+        (f, f_abspath) = tempfile.mkstemp()
+        print >>f, job_string
+        # print >>f, """
+        # 
+        # """
+        f.close()
+
+        process = subprocess.Popen(qsub+" "+f_abspath, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        returncode = process.returncode
+        (out, err) = process.communicate()
+        logging.info('Job submit stdout: %s' % out)
+        logging.info('Job submit stderr: %s' % err)
+        
+        # qsub returns "<job_id>.gpc-sched"
+        try:
+            self.id = message.split('.')[0]
+            # if this fails, the job id is invalid
+            int(jobid)
+        except:
+            logging.error('No jobid found in qsub output: %s' % message)
+            self.id = None
+
+    def get_job_properties(self):
+        if not self.id:
+            logging.error('Cannot get job properties with unknown job id')
+            return None
+        
+        process = subprocess.Popen('checkjob --format=XML %s' % (self.id,), shell=True, stdout=PIPE, stderr=PIPE)
+        (out,err) = process.communicate()
+        if not out:
+            return None
+
+        try:
+            dom = parseString(out)
+            jobs = dom.getElementsByTagName('job')
+            job = jobs[0]
+            job_props = {}
+            for prop in job.attributes.keys():
+                job_props[prop]=job.attributes[prop].nodeValue
+        except:
+            return None
         else:
-            return 'No replica'
+            return job_props
+
+    def is_job_done(self):
+        """ Assume job did start, so if the checkjob never heard of this job it must already have finished. """
+        props = self.get_job_properties(self.id)
+        if props and props['State'] is not 'Completed':
+            return False
+        else:
+            return True
+
+    def cancel_job(self):
+        if not self.id:
+            logging.error('Cannot cancel job with unknown job id')
+            return
+        else:
+            logging.info('Cancelling job %s' % self.id)
+        
+        process = subprocess.Popen('qdel %s' % (self.id,), shell=True, stdout=PIPE, stderr=PIPE)
+        (out,err) = process.communicate()
 
 
 class Node(object):

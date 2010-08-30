@@ -17,6 +17,7 @@ def main():
     parser = optparse.OptionParser(usage)
     parser.add_option("-l", "--host", dest="host", default="127.0.0.1", help="Server hostname [default: %default]")
     parser.add_option("-p", "--port", dest="port", default="7766", help="Server port [default: %default]")    
+    parser.add_option("-j", "--job-id", dest="jobid", default="", help="Job ID [default: %default]")    
     
     (options, args) = parser.parse_args()
     
@@ -26,8 +27,8 @@ def main():
     tries = 3
     while (1):
         try:
-            # connect to manager
-            replica_uri = manager.get_next_replica_uri()
+            # connect to manager, give it our jobid if we have one to associate the replica
+            replica_uri = manager.get_next_replica_uri(jobid)
         except ProtocolError:
             logging.warning("Connection to manager failed, retrying...")
             time.sleep(2)
@@ -39,9 +40,9 @@ def main():
             logging.info("Connected to manager")
             break
     
+    
     if replica_uri is not None:
         replica = replica_uri.getAttrProxy()
-        
         logging.info("Got replica %s" % replica)
         replica.status = Replica.RUNNING
         # manager.set_replica_status(replica, Replica.RUNNING)
