@@ -8,6 +8,7 @@ import shutil
 import tempfile
 import time
 from xml.dom.minidom import parseString
+from string import Template
 
 from tables import *
 
@@ -59,6 +60,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
         """
 
         for r in self.replicas.values():
+            # TODO: pass settings
             j = Job(self)
             j.submit()
             # job id is available after submission
@@ -158,41 +160,78 @@ class Job(object):
     """
     The Job class represents a job running through the cluster queue system.
     """
+        
+    DEFAULT_SUBMIT_SCRIPT_TEMPLATE = """
+#!/bin/bash
+#PBS -l nodes=${nodes}:ib:ppn=${ppn},walltime=${walltime},${extra}
+#PBS -N ${jobname}
+
+JOB_START_TIME=`date +%s`
+MPIFLAGS="${mpiflags}"
+
+# $PBS_O_WORKDIR
+# $PBS_JOBID
+
+cd $job_dir
+
+python ${pydr_path}/client.py -l ${pydr_server} -p ${pydr_port} -j $PBS_JOBID
+"""
 
     def __init__(self, manager):
         self.manager = manager
         self.replica = None
         self.node = None
-
+        self.id = None
+    
+    def jobname(self):
+        return 'pydrjob'
+        
+    def make_submit_script(self, options={}):
+        s = Template(self.DEFAULT_SUBMIT_SCRIPT_TEMPLATE)
+            
+        defaults = {    'nodes': '1',
+                        'ppn': '8',
+                        'walltime': '1:00:00',
+                        'extra': ['os=centos53computeA'],
+                        'jobname': self.jobname(),
+                        'mpiflags': '',
+                        'pydr_path': os.path.dirname(__file__),
+                        'pydr_server': 'localhost',
+                        'pydr_port': '7766',
+                        'job_dir': '/tmp',
+                    }
+        
+        defaults.update(options)
+            
+        if len(defaults['extra']) > 0:
+            defaults['extra'] = ','+','.join(defaults['extra'])
+        else:
+            defaults['extra'] = ''
+                
+        return s.safe_substitute(defaults)
+    
+    # Note: PBS-specific code
+    # TODO: extending this in the future to allow different queue systems
+    
     def submit(self):
-        """ Submit the job to a node by using qsub """
+        """ Submit a job using qsub """
+        
         logging.info('Submitting job...')
         # note: client will send the jobid back to server to associate a replica with a job
         
         # $PBS_JOBID
         # $PBS_O_WORKDIR
-
-    # def status(self):
-    #     """ Get the status of a job. Will determine Node and Replica information if possible """
-    #     if self.replica:
-    #         return self.replica.status
-    #     else:
-    #         return 'No replica'
-
-    # Note: PBS-specific code
-    # TODO: extending this in the future to allow different queue systems
-    
-    def submit_job_string(self, job_string):
-        """ Submit a job from a string using qsub """
-
         qsub = 'qsub'
 
         (f, f_abspath) = tempfile.mkstemp()
-        print >>f, job_string
+        f.write(self.make_submit_script)
+        # print >>f, job_string
         # print >>f, """
         # 
         # """
         f.close()
+
+        logging.info('Submit script file: %s' % f_abspath)
 
         process = subprocess.Popen(qsub+" "+f_abspath, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         returncode = process.returncode
