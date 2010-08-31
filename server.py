@@ -9,7 +9,7 @@ import time
 import datetime
 from xml.dom.minidom import parseString
 from string import Template
-from configobj import ConfigObj
+from configobj import ConfigObj, flatten_errors
 from validate import Validator
 
 
@@ -47,9 +47,21 @@ def main():
     # validate the config
     config = ConfigObj(options.config_file, configspec=PYDR_CONFIG_SPEC.split("\n"))
     validator = Validator()
-    config.validate(validator, copy=True)
+    result = config.validate(validator, preserve_errors=True)
     
-    return
+    # show config errors if there are any
+    if type(result) is dict:
+        log.error('Error(s) found in config file')
+        for entry in flatten_errors(config, result):
+            section_list, key, error = entry
+            if key is not None:
+               section_list.append(key)
+            else:
+                section_list.append('[missing section]')
+            section_string = ' -> '.join(section_list)
+            if error == False:
+                error = 'Missing value or section.'
+            print section_string, ' = ', error
     
     # run the Manager in Pyro
     Pyro.core.initServer()
