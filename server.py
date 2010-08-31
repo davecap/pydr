@@ -10,6 +10,8 @@ import datetime
 from xml.dom.minidom import parseString
 from string import Template
 from configobj import ConfigObj
+from validate import Validator
+
 
 import Pyro.core
 
@@ -25,6 +27,7 @@ log.addHandler(ch)
 #   - keep track of state with sqlite or serialize manager object
 #   - output snapshots every N seconds
 #   - get the client to run a specific job script
+#   - configobj validate the file
 #   - resubmit the server when walltime is low
 #   - DR algorithm for getting next replica to run
 
@@ -37,6 +40,12 @@ def main():
     parser.add_option("-c", "--config", dest="config_file", default="config.ini", help="Config file [default: %default]")    
     (options, args) = parser.parse_args()
     
+    # create config file with defaults if necessary
+    if not os.path.exists(options.config_file):
+        log.info('Creating new config file: %s' % options.config_file)
+        create_config(options.config_file)
+    
+    return
     # run the Manager in Pyro
     Pyro.core.initServer()
     daemon = Pyro.core.Daemon()
@@ -91,7 +100,11 @@ class Manager(Pyro.core.SynchronizedObjBase):
         """
         Start by submitting a job per replica.
         """
-
+        print self.config['server']['autosubmit']
+        if not self.config['server']['autosubmit']:
+            log.info('Autosubmit is false, not submitting replicas')
+            return
+        
         for r in self.replicas.values():
             j = Job(self)
             j.submit()
@@ -339,6 +352,61 @@ class Node(object):
     Using this class you can find out what's happening on a given node.
     """
     pass
-      
+
+#
+# Config Spec
+#
+
+PYDR_CONFIG_SPEC = """#
+# PyDR Config File
+#
+
+# set a title for this setup
+title = string(default='My DR')
+
+# System paths
+[system]
+qsub_path = string(default='qsub')
+checkjob_path = string(default='checkjob')
+
+# DR server settings
+[server]
+canvas_border = integer(min=1024, max=65534, default=7766)
+autosubmit = boolean(default=True)
+
+# job specific information
+[job]
+job_name_prefix = string(default='mysystem')
+ppn = integer(min=1, max=64, default=1)
+nodes = integer(min=1, max=9999999, default=1)
+# walltime in seconds
+walltime = integer(min=1, max=999999, default=86400)
+timeout = integer(min=0, max=999999, default=10000)
+    
+[simulation]
+# TODO: type?
+# TODO: extra parameters depending on type go here
+
+    # DRPE settings (simulation -> drpe)
+    [[drpe]]
+
+# Replica settings
+[replicas]
+
+# END
+"""
+
+def create_config(path='config.ini'):
+    """
+    Create a config file using a configspec
+    and validate it against a Validator object
+    """
+    spec = PYDR_CONFIG_SPEC.split("\n")
+    config = ConfigObj(path, configspec=spec)
+    validator = Validator()
+    config.validate(validator, copy=True)
+    config.filename = path
+    config.write()
+  
 if __name__=='__main__':
     main()
