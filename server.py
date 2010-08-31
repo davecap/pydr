@@ -27,7 +27,6 @@ log.addHandler(ch)
 #   - keep track of state with sqlite or serialize manager object
 #   - output snapshots every N seconds
 #   - get the client to run a specific job script
-#   - configobj validate the file
 #   - resubmit the server when walltime is low
 #   - DR algorithm for getting next replica to run
 
@@ -45,12 +44,18 @@ def main():
         log.info('Creating new config file: %s' % options.config_file)
         create_config(options.config_file)
     
+    # validate the config
+    config = ConfigObj(options.config_file, configspec=PYDR_CONFIG_SPEC.split("\n"))
+    validator = Validator()
+    config.validate(validator, copy=True)
+    
     return
+    
     # run the Manager in Pyro
     Pyro.core.initServer()
     daemon = Pyro.core.Daemon()
     
-    manager = Manager(options.config_file, daemon)
+    manager = Manager(config, daemon)
     uri = daemon.connect(manager, "manager")
     manager.submit_all_replicas()
     
@@ -74,7 +79,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
     The Manager class is the class shared by Pyro. It handles jobs, nodes and replicas.
     """
     
-    def __init__(self, config_file, daemon):
+    def __init__(self, config, daemon):
         Pyro.core.SynchronizedObjBase.__init__(self)
         
         self.daemon = daemon
@@ -82,8 +87,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
         self.jobs = {}
         # replicas[<replica id>] = Replica()
         self.replicas = {}
-        self.config_file = config_file
-        self.config = ConfigObj(self.config_file)
+        self.config = config
         
         # configs: system, server, jobs, simulation, replicas
         
@@ -240,7 +244,7 @@ python ${pydr_client_path} -l ${pydr_server} -p ${pydr_port} -j $PBS_JOBID
                         'extra': ['os=centos53computeA'],
                         'jobname': self.jobname(),
                         'mpiflags': '',
-                        'job_dir': os.path.abspath(os.path.dirname(self.manager.config_file)),
+                        'job_dir': os.path.abspath(os.path.dirname(self.manager.config.filename)),
                         'pydr_client_path': os.path.abspath(os.path.dirname(__file__)),
                         'pydr_server': self.manager.daemon.hostname,
                         'pydr_port': self.manager.daemon.port,
@@ -371,7 +375,7 @@ checkjob_path = string(default='checkjob')
 
 # DR server settings
 [server]
-canvas_border = integer(min=1024, max=65534, default=7766)
+port = integer(min=1024, max=65534, default=7766)
 autosubmit = boolean(default=True)
 
 # job specific information
@@ -401,12 +405,11 @@ def create_config(path='config.ini'):
     Create a config file using a configspec
     and validate it against a Validator object
     """
-    spec = PYDR_CONFIG_SPEC.split("\n")
-    config = ConfigObj(path, configspec=spec)
+    config = ConfigObj(path, configspec=PYDR_CONFIG_SPEC.split("\n"))
     validator = Validator()
     config.validate(validator, copy=True)
     config.filename = path
     config.write()
-  
+
 if __name__=='__main__':
     main()
