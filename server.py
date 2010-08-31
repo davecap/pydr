@@ -37,31 +37,11 @@ def main():
     
     parser = optparse.OptionParser(usage)
     parser.add_option("-c", "--config", dest="config_file", default="config.ini", help="Config file [default: %default]")    
+    parser.add_option("-l", "--host", dest="host", default=None, help="Transfer server hostname [default: %default]")
+    parser.add_option("-p", "--port", dest="port", default="7766", help="Transfer server port [default: %default]")
     (options, args) = parser.parse_args()
     
-    # create config file with defaults if necessary
-    if not os.path.exists(options.config_file):
-        log.info('Creating new config file: %s' % options.config_file)
-        create_config(options.config_file)
-    
-    # validate the config
-    config = ConfigObj(options.config_file, configspec=PYDR_CONFIG_SPEC.split("\n"))
-    validator = Validator()
-    result = config.validate(validator, preserve_errors=True)
-    
-    # show config errors if there are any
-    if type(result) is dict:
-        log.error('Error(s) found in config file')
-        for entry in flatten_errors(config, result):
-            section_list, key, error = entry
-            if key is not None:
-               section_list.append(key)
-            else:
-                section_list.append('[missing section]')
-            section_string = ' -> '.join(section_list)
-            if error == False:
-                error = 'Missing value or section.'
-            print section_string, ' = ', error
+    config = setup_config(options.config_file)
     
     # run the Manager in Pyro
     Pyro.core.initServer()
@@ -69,7 +49,6 @@ def main():
     
     manager = Manager(config, daemon)
     uri = daemon.connect(manager, "manager")
-    manager.submit_all_replicas()
     
     print "The daemon runs on port:",daemon.port
     print "The object's uri is:",uri
@@ -78,7 +57,8 @@ def main():
     
     try:
         while 1:
-            daemon.handleRequests(10.0)
+            manager.autosubmit()
+            daemon.handleRequests(5.0)
             current_time = datetime.datetime.now()
             # manager.submit_new_server()
             # time_since_start = current_time - start_time
@@ -112,23 +92,24 @@ class Manager(Pyro.core.SynchronizedObjBase):
         if not len(self.replicas.items()):
             raise Exception('No replicas found in config file... exiting!')
          
-    def submit_all_replicas(self):
+    def autosubmit(self):
         """
-        Start by submitting a job per replica.
+        Submit replicas 
         """
-        print self.config['server']['autosubmit']
         if not self.config['server']['autosubmit']:
-            log.info('Autosubmit is false, not submitting replicas')
+            log.debug('Autosubmit is off, not submitting replicas')
             return
         
         for r in self.replicas.values():
-            j = Job(self)
-            j.submit()
-            # job id is available after submission
-            if j.id:
-                self.jobs[j.id] = j
-            # sleep to prevent overloading the server
-            time.sleep(1)
+            if r.status == Replica.IDLE:
+                j = Job(self)
+                j.submit()
+                # job id is available after submission
+                if j.id:
+                    self.jobs[j.id] = j
+                # sleep to prevent overloading the server
+                time.sleep(1)
+                r.status = Replica.READY
     
     def save_state(self):
         # TODO
@@ -157,7 +138,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
                     r.job = self.jobs[jobid]
                 else:
                     log.warning('Job sent invalid job id %s, will not associate it with replica' % jobid)
-                r.status = Replica.SENT
+                # r.status == Replica.RUNNING # status set in client
                 return r.uri
                 # return Pyro.core.PyroURI("PYROLOC://%s:%s/replica/%d" % (self.daemon.host, self.daemon.port, r.id))
         log.warning('No replicas ready to run')
@@ -183,17 +164,17 @@ class Replica(Pyro.core.ObjBase):
     """
 
     # Status
-    ERROR = 'error'         # replica sent an error
-    RUNNING = 'running'     # replica running
+    IDLE = 'idle'     # replica is idle, not involved in anything yet
     READY = 'ready'         # replica is waiting to run
+    RUNNING = 'running'     # replica was sent to a client
+    ERROR = 'error'         # replica sent an error
     FINISHED = 'finished'   # replica finished running
-    SENT = 'sent'           # replica sent to a client
 
     def __init__(self, id, options={}):
         Pyro.core.ObjBase.__init__(self)
         
         self.id = id
-        self.status = self.READY
+        self.status = self.IDLE
         self.uri = None
         # current job running this replica
         self.job = None
@@ -201,7 +182,7 @@ class Replica(Pyro.core.ObjBase):
         self.end_time = None
         
         # settings will come in **kwargs
-        print options
+        # print options
 
     def __repr__(self):
         return '<Replica %s:%s>' % (str(self.id), self.status)
@@ -422,6 +403,33 @@ def create_config(path='config.ini'):
     config.validate(validator, copy=True)
     config.filename = path
     config.write()
+
+def setup_config(path='config.ini'):
+    # create config file with defaults if necessary
+    if not os.path.exists(path):
+        log.info('Creating new config file: %s' % path)
+        create_config(path)
+    
+    # validate the config
+    config = ConfigObj(path, configspec=PYDR_CONFIG_SPEC.split("\n"))
+    validator = Validator()
+    result = config.validate(validator, preserve_errors=True)
+    
+    # show config errors if there are any
+    if type(result) is dict:
+        for entry in flatten_errors(config, result):
+            section_list, key, error = entry
+            if key is not None:
+               section_list.append(key)
+            else:
+                section_list.append('[missing section]')
+            section_string = ' -> '.join(section_list)
+            if error == False:
+                error = 'Missing value or section.'
+            print section_string, ' = ', error
+        raise Exception('Errors in config file')
+    else:
+        return config
 
 if __name__=='__main__':
     main()
