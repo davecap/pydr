@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import time
 import datetime
+import math
 from xml.dom.minidom import parseString
 from string import Template
 from configobj import ConfigObj, flatten_errors
@@ -27,7 +28,6 @@ log.addHandler(ch)
 #   - keep track of state with sqlite or serialize manager object
 #   - output snapshots every N seconds
 #   - get the client to run a specific job script
-#   - resubmit the server when walltime is low
 #   - DR algorithm for getting next replica to run
 
 def main():
@@ -50,19 +50,15 @@ def main():
     manager = Manager(config, daemon)
     uri = daemon.connect(manager, "manager")
     
-    print "The daemon runs on port:",daemon.port
-    print "The object's uri is:",uri
-    
-    start_time = datetime.datetime.now()
+    log.info('The daemon is running at: %s:%s' % (daemon.hostname, daemon.port))
+    log.info('The manager\'s uri is: %s' % uri)
     
     try:
+        start_time = datetime.datetime.now()
         while 1:
-            manager.autosubmit()
+            # run maintenance every 'timedelta' which is the time since starting the server
+            manager.maintain(datetime.datetime.now()-start_time)            
             daemon.handleRequests(5.0)
-            current_time = datetime.datetime.now()
-            # manager.submit_new_server()
-            # time_since_start = current_time - start_time
-            # if nearing walltime then submit a new manager
     finally:
         daemon.shutdown(True)
 
@@ -80,6 +76,8 @@ class Manager(Pyro.core.SynchronizedObjBase):
         # replicas[<replica id>] = Replica()
         self.replicas = {}
         self.config = config
+        self.server_submitted = False   # see self.submit_server()
+        self.last_snapshot_time = 0     # last time a snapshot was made
         
         # configs: system, server, jobs, simulation, replicas
         
@@ -91,7 +89,44 @@ class Manager(Pyro.core.SynchronizedObjBase):
         
         if not len(self.replicas.items()):
             raise Exception('No replicas found in config file... exiting!')
-         
+    
+    def maintain(self, timedelta):
+        """ Maintenance code that runs between daemon.handleRequests() calls """
+        # always try running autosubmit regardless of timedelta
+        self.autosubmit()
+        
+        # calculate total number of seconds
+        seconds_since_start = timedelta.seconds + timedelta.days*24*60*60
+        seconds_remaining = self.config['server']['walltime'] - seconds_since_start
+        
+        self.snapshot(seconds_since_start)
+        
+        # should we submit a new server?
+        # if time left is less than half the walltime, submit a new server
+        if not self.server_submitted and seconds_remaining < float(self.config['server']['walltime'])/2.0:
+            self.submit_server()
+    
+    def snapshot(self, seconds_since_start=0):
+        """ Write a snapshot of the Manager to disk """
+        if (seconds_since_start/self.config['server']['snapshottime']) <= (self.last_snapshot_time/self.config['server']['snapshottime']):
+            log.debug('Not writing a snapshot... snapshottime interval not reached')
+            return False
+        
+        self.last_snapshot_time = seconds_since_start
+        log.info('Writing server snapshot...')
+        # TODO: write snapshot
+    
+    def submit_server(self):
+        """ Submit a job that will run the new server """
+        log.info('Submitting new server...')
+        self.server_submitted = True
+        # TODO: make a Job with custom script...
+        
+    def transfer(self, ip, port):
+        """ Initiate the transfer of the server to the new server address """
+        # TODO: write/flush the DB
+        # TODO: set the new server IP for clients that still connect to this one
+       
     def autosubmit(self):
         """
         Submit replicas 
@@ -370,22 +405,24 @@ checkjob_path = string(default='checkjob')
 [server]
 port = integer(min=1024, max=65534, default=7766)
 autosubmit = boolean(default=True)
+walltime = integer(min=1, max=999999, default=86400)
+snapshottime = integer(min=1, max=999999, default=3600)
 
-# job specific information
-[job]
+# client (Job) specific information
+[client]
 job_name_prefix = string(default='mysystem')
 ppn = integer(min=1, max=64, default=1)
 nodes = integer(min=1, max=9999999, default=1)
 # walltime in seconds
 walltime = integer(min=1, max=999999, default=86400)
+# timeout before server resubmits a client
 timeout = integer(min=0, max=999999, default=10000)
-    
-[simulation]
-# TODO: type?
-# TODO: extra parameters depending on type go here
 
-    # DRPE settings (simulation -> drpe)
-    [[drpe]]
+# TODO: simulation type?
+# TODO: extra parameters depending on type will go here
+
+# DRPE settings (simulation -> drpe)
+[drpe]
 
 # Replica settings
 [replicas]
