@@ -23,8 +23,9 @@ log.addHandler(ch)
 
 # TODO:
 #   - keep track of state with sqlite or serialize manager object
+#   - output snapshots every N seconds
 #   - get the client to run a specific job script
-#   - resubmit the server when walltime is low (some kind of timer?)
+#   - resubmit the server when walltime is low
 #   - DR algorithm for getting next replica to run
 
 def main():
