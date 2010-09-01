@@ -1,4 +1,5 @@
 #!/usr/bin/python
+#
 # TODO:
 #   - keep track of state with sqlite or serialize manager object
 #   - output snapshots every N seconds
@@ -41,7 +42,6 @@ class Manager(Pyro.core.SynchronizedObjBase):
     def __init__(self, config, daemon):
         Pyro.core.SynchronizedObjBase.__init__(self)
         
-        self.daemon = daemon
         # jobs[<job id>] = Job()
         self.jobs = {}
         # replicas[<replica id>] = Replica()
@@ -51,15 +51,13 @@ class Manager(Pyro.core.SynchronizedObjBase):
         
         # details about mobile server
         self.status = Manager.ACTIVE
-        self.new_server_host = None
-        self.new_server_port = None
-        
-        # configs: system, server, jobs, simulation, replicas
-        
+        self.server_host = daemon.hostname
+        self.server_port = daemon.port
+                
         for r_id, r_config in self.config['replicas'].items():
             log.info('Adding replica: %s -> %s' % (r_id, r_config))
             r = Replica(id=r_id, options=r_config)
-            r.uri = self.daemon.connect(r, 'replica/%s' % r.id)
+            r.uri = daemon.connect(r, 'replica/%s' % r.id)
             self.replicas[r.id] = r
         
         if not len(self.replicas.items()):
@@ -85,7 +83,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
         if self.status == Manager.ACTIVE and seconds_remaining < float(self.config['server']['walltime'])/2.0:
             log.info('Server will transfer to the next client that connects...')
             self.status = Manager.TRANSFER
-            # TODO: write/flush DB
+            # TODO: write snapshot + close
     
     def snapshot(self, seconds_since_start=0):
         """ Write a snapshot of the Manager to disk """
@@ -96,11 +94,26 @@ class Manager(Pyro.core.SynchronizedObjBase):
         self.last_snapshot_time = seconds_since_start
         log.info('Writing server snapshot...')
         # TODO: write snapshot
+        # what do we need to write:
+        #   - jobs (self.jobs)
+        #       - job id
+        #       - replica id
+        #       - job state (get_job_properties()['State'])
+        #   - replicas (self.replicas)
+        #       - id
+        #       - status
+        #       - uri
+        #       - job
+        #       - start_time
+        #       - end_time
+        #       - sequence
+        #   - server information
+        #       - status
+        #       - host
+        #       - ip
        
     def autosubmit(self):
-        """
-        Submit replicas 
-        """
+        """ Submit replicas if necessary """
         if not self.config['server']['autosubmit']:
             log.debug('Autosubmit is off, not submitting replicas')
             return
@@ -115,10 +128,6 @@ class Manager(Pyro.core.SynchronizedObjBase):
                 # sleep to prevent overloading the server
                 time.sleep(1)
                 r.status = Replica.READY
-    
-    def save_state(self):
-        # TODO
-        pass
     
     def show_replicas(self):
         """ Print the status of all replicas """
@@ -145,9 +154,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
                     r.job = self.jobs[jobid]
                 else:
                     log.warning('Job sent invalid job id %s, will not associate it with replica' % jobid)
-                # r.status == Replica.RUNNING # status set in client
                 return r.uri
-                # return Pyro.core.PyroURI("PYROLOC://%s:%s/replica/%d" % (self.daemon.host, self.daemon.port, r.id))
         log.warning('No replicas ready to run')
         return None
 
@@ -171,7 +178,7 @@ class Replica(Pyro.core.ObjBase):
     """
 
     # Status
-    IDLE = 'idle'     # replica is idle, not involved in anything yet
+    IDLE = 'idle'           # replica is idle, not involved in anything yet
     READY = 'ready'         # replica is waiting to run
     RUNNING = 'running'     # replica was sent to a client
     ERROR = 'error'         # replica sent an error
@@ -181,6 +188,7 @@ class Replica(Pyro.core.ObjBase):
         Pyro.core.ObjBase.__init__(self)
         
         self.id = id
+        self.sequence = 0
         self.status = self.IDLE
         self.uri = None
         # current job running this replica
@@ -198,6 +206,7 @@ class Replica(Pyro.core.ObjBase):
         """ The actual code that runs the replica on the client node """
         print 'Running replica %d' % self.id
         self.start_time = datetime.datetime.now()
+        self.sequence += 1
         self.end_time = None
         # TODO: what to do here??
         
@@ -230,7 +239,6 @@ python ${pydr_client_path} -l ${pydr_server} -p ${pydr_port} -j $PBS_JOBID
     def __init__(self, manager):
         self.manager = manager
         self.replica = None
-        self.node = None
         self.id = None
     
     def jobname(self):
@@ -246,8 +254,8 @@ python ${pydr_client_path} -l ${pydr_server} -p ${pydr_port} -j $PBS_JOBID
                         'mpiflags': '',
                         'job_dir': os.path.abspath(os.path.dirname(self.manager.config.filename)),
                         'pydr_client_path': os.path.abspath(os.path.dirname(__file__)),
-                        'pydr_server': self.manager.daemon.hostname,
-                        'pydr_port': self.manager.daemon.port,
+                        'pydr_server': self.manager.server_host,
+                        'pydr_port': self.manager.server_port,
                     }
         
         defaults.update(options)

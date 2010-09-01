@@ -44,31 +44,31 @@ def main():
     while(1):
         # connect to the manager
         manager = Pyro.core.getAttrProxyForURI("PYROLOC://%s:%s/manager" % (server_host, server_port))
-        
         try:
             if manager.status == manager.INACTIVE:
                 log.info('Manager is inactive, getting new host/port')
-                server_host = manager.new_server_host
-                server_port = manager.new_server_port
+                server_host = manager.server_host
+                server_port = manager.server_port
             elif manager.status == manager.TRANSFER:
                 log.info('Manager wants to transfer to client, starting new manager')
                 # set the server to inactive
                 manager.status = manager.INACTIVE
-                manager.new_server_host = client_host
-                manager.new_server_port = client_port
+                manager.server_host = client_host
+                manager.server_port = client_port
                 # TODO: start a new server here
             else:
                 log.info('Manager is active, getting next replica')
-                replica_uri = manager.get_next_replica_uri(options.jobid)
-                if replica_uri is not None:
-                    replica = replica_uri.getAttrProxy()
-                    log.info("Got replica %s" % replica)
-                    replica.status = Replica.RUNNING
-                    replica.run()
-                    replica.status = Replica.FINISHED
+                # TODO: reconnect to manager to change status! manager might have died
+                
+                # replica_uri = manager.get_next_replica_uri(options.jobid)
+                # if replica_uri is not None:
+                #     replica = replica_uri.getAttrProxy()
+                #     log.info("Got replica %s" % replica)
+                #     replica.status = Replica.RUNNING
+                #     replica.run()
+                #     replica.status = Replica.FINISHED                
                 else:
                     log.warning("Nothing to run... retrying")
-        
         except ProtocolError:
             log.error("Connection to manager failed... will retry")
             tries += 1

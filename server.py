@@ -3,6 +3,7 @@ import optparse
 import logging
 import datetime
 import Pyro.core
+import shelve
 
 import pydr
 
@@ -20,7 +21,8 @@ def main():
     """
     
     parser = optparse.OptionParser(usage)
-    parser.add_option("-c", "--config", dest="config_file", default="config.ini", help="Config file [default: %default]")    
+    parser.add_option("-c", "--config", dest="config_file", default="config.ini", help="Config file [default: %default]")
+    parser.add_option("-s", "--snapshot", dest="snapshot_file", default=None, help="Snapshot file [default: %default]")
     (options, args) = parser.parse_args()
     
     config = pydr.setup_config(options.config_file)
@@ -30,7 +32,8 @@ def main():
     daemon = Pyro.core.Daemon()
     
     manager = pydr.Manager(config, daemon)
-    uri = daemon.connect(manager, "manager")
+    
+    uri = daemon.connect(manager, 'manager')
     
     log.info('The daemon is running at: %s:%s' % (daemon.hostname, daemon.port))
     log.info('The manager\'s uri is: %s' % uri)
