@@ -2,7 +2,6 @@
 #
 # TODO:
 #   - keep track of state with sqlite or serialize manager object
-#   - output snapshots every N seconds
 #   - get the client to run a specific job script
 #   - DR algorithm for getting next replica to run
 
@@ -14,6 +13,7 @@ import tempfile
 import time
 import datetime
 import math
+import pickle
 from xml.dom.minidom import parseString
 from string import Template
 from configobj import ConfigObj, flatten_errors
@@ -28,6 +28,40 @@ ch = logging.StreamHandler()
 log.setLevel(logging.DEBUG)
 ch.setFormatter(formatter)
 log.addHandler(ch)
+
+class Snapshot(object):
+    # TODO: write snapshot
+    # what do we need to write:
+    #   - jobs (self.jobs)
+    #       - job id
+    #       - replica id
+    #       - job state (get_job_properties()['State'])
+    #   - replicas (self.replicas)
+    #       - id
+    #       - status
+    #       - uri
+    #       - job
+    #       - start_time
+    #       - end_time
+    #       - sequence
+    #   - server information
+    #       - status
+    #       - host
+    #       - ip
+    def __init__(self, manager):
+        pass
+        
+    def load_jobs(self):
+        pass
+    
+    def load_replicas(self):
+        pass
+        
+    def save(self):
+        pass
+        
+    def close(self):
+        pass
 
 class Manager(Pyro.core.SynchronizedObjBase):           
     """
@@ -53,13 +87,32 @@ class Manager(Pyro.core.SynchronizedObjBase):
         self.status = Manager.ACTIVE
         self.server_host = daemon.hostname
         self.server_port = daemon.port
-                
-        for r_id, r_config in self.config['replicas'].items():
-            log.info('Adding replica: %s -> %s' % (r_id, r_config))
-            r = Replica(id=r_id, options=r_config)
-            r.uri = daemon.connect(r, 'replica/%s' % r.id)
-            self.replicas[r.id] = r
         
+        # load from snapshot if one is found
+        if os.path.exists(self.config['server']['snapshotfile']):
+            log.info('Loading snapshot from %s' % (self.config['server']['snapshotfile']))
+            snapshotfile = open(self.config['server']['snapshotfile'], 'r')
+            self.snapshot = pickle.load(snapshotfile)
+            self.snapshot.manager = self
+            self.jobs = snapshot.load_jobs()
+            self.replicas = snapshot.load_replicas()
+            for r_id, r_config in self.config['replicas'].items():
+                log.info('Validating/Connecting replica: %s' % (r_id))
+                if r_id not in self.replicas.keys():
+                    raise Exception('Replica %s found in config but not in snapshot!' % str(r_id))
+                for c in r_config.keys():
+                    if c not in self.replicas[r_id].options.keys():
+                        raise Exception('Mismatch between snapshot and config replica options: %s vs %s' % (self.replicas[r_id].options.keys(), r_config.keys()))
+                self.replicas[r_id].uri = daemon.connect(r, 'replica/%s' % r_id)
+            snapshotfile.close()
+            log.info('Snapshot loaded successfuly')
+        else:
+            self.snapshot = Snapshot(self)
+            for r_id, r_config in self.config['replicas'].items():
+                log.info('Adding replica: %s -> %s' % (r_id, r_config))
+                r = Replica(id=r_id, options=r_config)
+                r.uri = daemon.connect(r, 'replica/%s' % r.id)
+                self.replicas[r.id] = r
         if not len(self.replicas.items()):
             raise Exception('No replicas found in config file... exiting!')
     
@@ -83,7 +136,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
         if self.status == Manager.ACTIVE and seconds_remaining < float(self.config['server']['walltime'])/2.0:
             log.info('Server will transfer to the next client that connects...')
             self.status = Manager.TRANSFER
-            # TODO: write snapshot + close
+            self.snapshot.close()
     
     def snapshot(self, seconds_since_start=0):
         """ Write a snapshot of the Manager to disk """
@@ -92,25 +145,9 @@ class Manager(Pyro.core.SynchronizedObjBase):
             return False
         
         self.last_snapshot_time = seconds_since_start
-        log.info('Writing server snapshot...')
-        # TODO: write snapshot
-        # what do we need to write:
-        #   - jobs (self.jobs)
-        #       - job id
-        #       - replica id
-        #       - job state (get_job_properties()['State'])
-        #   - replicas (self.replicas)
-        #       - id
-        #       - status
-        #       - uri
-        #       - job
-        #       - start_time
-        #       - end_time
-        #       - sequence
-        #   - server information
-        #       - status
-        #       - host
-        #       - ip
+        log.info('Saving server snapshot...')
+        self.snapshot.save()
+        log.info('Done saving server snapshot...')
        
     def autosubmit(self):
         """ Submit replicas if necessary """
@@ -196,22 +233,23 @@ class Replica(Pyro.core.ObjBase):
         self.start_time = None
         self.end_time = None
         
-        # settings will come in **kwargs
-        # print options
+        self.options = options
 
     def __repr__(self):
         return '<Replica %s:%s>' % (str(self.id), self.status)
     
     def run(self):
         """ The actual code that runs the replica on the client node """
-        print 'Running replica %d' % self.id
+        log.info('Running replica %s-%d' % (str(self.id), self.sequence))
+        
         self.start_time = datetime.datetime.now()
-        self.sequence += 1
         self.end_time = None
         # TODO: what to do here??
         
         return_code = subprocess.call(['sleep', '3'], 0, None, None)
-        print 'Replica %s finished' % str(self.id)
+        
+        log.info('Replica finished running %s-%d' % (str(self.id), self.sequence))
+        self.sequence += 1
         self.end_time = datetime.datetime.now()
         return return_code
 
@@ -379,6 +417,7 @@ title = string(default='My DR')
     autosubmit = boolean(default=True)
     walltime = integer(min=1, max=999999, default=86400)
     snapshottime = integer(min=1, max=999999, default=3600)
+    snapshotfile = string(default='snapshot.pickle')
 
 # client (Job) specific information
 [client]
