@@ -370,34 +370,57 @@ title = string(default='My DR')
 
 # System paths
 [system]
-qsub_path = string(default='qsub')
-checkjob_path = string(default='checkjob')
+    qsub_path = string(default='qsub')
+    checkjob_path = string(default='checkjob')
 
 # DR server settings
 [server]
-port = integer(min=1024, max=65534, default=7766)
-autosubmit = boolean(default=True)
-walltime = integer(min=1, max=999999, default=86400)
-snapshottime = integer(min=1, max=999999, default=3600)
+    port = integer(min=1024, max=65534, default=7766)
+    autosubmit = boolean(default=True)
+    walltime = integer(min=1, max=999999, default=86400)
+    snapshottime = integer(min=1, max=999999, default=3600)
 
 # client (Job) specific information
 [client]
-job_name_prefix = string(default='mysystem')
-ppn = integer(min=1, max=64, default=1)
-nodes = integer(min=1, max=9999999, default=1)
-# walltime in seconds
-walltime = integer(min=1, max=999999, default=86400)
-# timeout before server resubmits a client
-timeout = integer(min=0, max=999999, default=10000)
+    job_name_prefix = string(default='mysystem')
+    ppn = integer(min=1, max=64, default=1)
+    nodes = integer(min=1, max=9999999, default=1)
+    # walltime in seconds
+    walltime = integer(min=1, max=999999, default=86400)
+    # timeout before server resubmits a client
+    timeout = integer(min=0, max=999999, default=10000)
 
-# TODO: simulation type?
-# TODO: extra parameters depending on type will go here
-
-# DRPE settings (simulation -> drpe)
-[drpe]
+    # files required by the client
+    [[files]]
+        # the run script is executed by the client for each replica
+        # it defaults to run.sh (located in the same directory as config.ini)
+        # replica variables are passed to this script via the client
+        run = string(default='run.sh')
+    
+        # link files are not modified but are required by each replica/sequence, they are linked to save disk space
+        # ex: link = initial.pdb, initial.psf
+        link = string_list(min=0, default=list())
+        
+        # copy files are files copied to each sequence. They may be modified by the run script at run-time
+        # copy = md.conf, tclforces.tcl
+        copy = string_list(min=0, default=list())
+        
+        # restart files are output files expected after a replica is done running
+        # ex: restart = restart.vel, restart.coor, restart.xsc
+        restart = string_list(min=0, default=list())
 
 # Replica settings
 [replicas]
+    # each replica is listed here numbered from 0 to N
+    # [[0]]
+    #     k = 0.1
+    #     coordinate = 10
+    # [[1]]
+    #     k = 0.1
+    #     coordinate = 20
+    # [[2]]
+    #     k = 0.1
+    #     coordinate = 30
 
 # END
 """
