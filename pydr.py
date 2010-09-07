@@ -103,7 +103,8 @@ class Manager(Pyro.core.SynchronizedObjBase):
                 for c in r_config.keys():
                     if c not in self.replicas[r_id].options.keys():
                         raise Exception('Mismatch between snapshot and config replica options: %s vs %s' % (self.replicas[r_id].options.keys(), r_config.keys()))
-                self.replicas[r_id].uri = daemon.connect(r, 'replica/%s' % r_id)
+                self.replicas[r_id].uri_path = 'replica/%s' % r_id
+                self.replicas[r_id].uri = daemon.connect(r, self.replicas[r_id].uri_path)
             snapshotfile.close()
             log.info('Snapshot loaded successfuly')
         else:
@@ -191,7 +192,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
                     r.job = self.jobs[jobid]
                 else:
                     log.warning('Job sent invalid job id %s, will not associate it with replica' % jobid)
-                return r.uri
+                return r.uri_path
         log.warning('No replicas ready to run')
         return None
 
@@ -225,16 +226,15 @@ class Replica(Pyro.core.ObjBase):
         Pyro.core.ObjBase.__init__(self)
         
         self.id = id
-        self.sequence = 0
         self.status = self.IDLE
         self.uri = None
         # current job running this replica
         self.job = None
         self.start_time = None
         self.end_time = None
-        
+        self.sequence = 0
         self.options = options
-
+        
     def __repr__(self):
         return '<Replica %s:%s>' % (str(self.id), self.status)
     
@@ -244,12 +244,12 @@ class Replica(Pyro.core.ObjBase):
         
         self.start_time = datetime.datetime.now()
         self.end_time = None
-        # TODO: what to do here??
         
+        # TODO: turn the replica options into shell variables
+        # TODO: run the shell script specified in the config
         return_code = subprocess.call(['sleep', '3'], 0, None, None)
         
         log.info('Replica finished running %s-%d' % (str(self.id), self.sequence))
-        self.sequence += 1
         self.end_time = datetime.datetime.now()
         return return_code
 
@@ -292,6 +292,7 @@ python ${pydr_client_path} -l ${pydr_server} -p ${pydr_port} -j $PBS_JOBID
                         'mpiflags': '',
                         'job_dir': os.path.abspath(os.path.dirname(self.manager.config.filename)),
                         'pydr_client_path': os.path.abspath(os.path.dirname(__file__)),
+                        'pydr_server_path': os.path.abspath(os.path.dirname(__file__)),
                         'pydr_server': self.manager.server_host,
                         'pydr_port': self.manager.server_port,
                     }

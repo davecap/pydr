@@ -1,5 +1,6 @@
 #!/usr/bin/python
 import optparse
+import os
 import logging
 import time
 import socket
@@ -39,7 +40,9 @@ def main():
     client_port = options.port
     
     # for the duration of this job, run a while loop that repeatedly gets runs from the server
+    replica_uri_path = None
     tries = 0
+    
     log.debug('Starting client loop...')
     while(1):
         # connect to the manager
@@ -55,20 +58,30 @@ def main():
                 manager.status = manager.INACTIVE
                 manager.server_host = client_host
                 manager.server_port = client_port
-                # TODO: start a new server here
-            else:
-                log.info('Manager is active, getting next replica')
-                # TODO: reconnect to manager to change status! manager might have died
+                client_path = os.path.abspath(os.path.dirname(__file__)),
+                server_path = client_path.replace('client.py','server.py')
+                # TODO
                 
-                # replica_uri = manager.get_next_replica_uri(options.jobid)
-                # if replica_uri is not None:
-                #     replica = replica_uri.getAttrProxy()
-                #     log.info("Got replica %s" % replica)
-                #     replica.status = Replica.RUNNING
-                #     replica.run()
-                #     replica.status = Replica.FINISHED                
+                #config_path = os.path.abspath(manager.config.filename)
+                #snapshot_path = os.path.abspath(manager.snapshot.path)
+                #'python ${server_path} -c -s'
+            else:
+                if manager.server_host != server_host:
+                    log.info('Manager is forwarding this client to new host (%s:%s)' % (manager.server_host, manager.server_port))
+                    server_host = manager.server_host
+                    server_port = manager.server_port
                 else:
-                    log.warning("Nothing to run... retrying")
+                    log.info('Manager is active, getting next replica')
+                    # returns a string uri
+                    replica_uri_path = manager.get_next_replica_uri(options.jobid)
+                    if replica_uri_path:
+                        log.info('Client got replica uri path: %s' % replica_uri_path)
+                        replica = Pyro.core.getAttrProxyForURI("PYROLOC://%s:%s/%s" % (server_host, server_port, replica_uri_path))
+                        log.info('Client got replica %s' % str(replica))
+                        # run everything here, this may take a while...
+                        replica.run()
+                    else:
+                        log.info('Client did not get any replica to run, will retry...')              
         except ProtocolError:
             log.error("Connection to manager failed... will retry")
             tries += 1
