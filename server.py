@@ -23,6 +23,8 @@ def main():
     parser = optparse.OptionParser(usage)
     parser.add_option("-c", "--config", dest="config_file", default="config.ini", help="Config file [default: %default]")
     parser.add_option("-s", "--snapshot", dest="snapshot_file", default=None, help="Snapshot file [default: %default]")
+    parser.add_option("-t", "--start-time", dest="start_time", default=None, help="Start time in seconds [default: %default]")
+    
     (options, args) = parser.parse_args()
     
     config = pydr.setup_config(options.config_file)
@@ -30,18 +32,20 @@ def main():
     # run the Manager in Pyro
     Pyro.core.initServer()
     daemon = Pyro.core.Daemon()
-    
     manager = pydr.Manager(config, daemon)
-    
     uri = daemon.connect(manager, 'manager')
-    
     log.info('The daemon is running at: %s:%s' % (daemon.hostname, daemon.port))
     log.info('The manager\'s uri is: %s' % uri)
     
     try:
-        start_time = datetime.datetime.now()
+        # set a fake start time if we are started by a client job
+        if options.start_time is None:
+            start_time = datetime.datetime.now()
+        else:
+            start_time = datetime.datetime.fromtimestamp(float(options.start_time))
+        
         while 1:
-            # run maintenance every 'timedelta' which is the time since starting the server
+            # run maintenance every 'timedelta' which is the time since starting the cluster job
             manager.maintain(datetime.datetime.now()-start_time)            
             daemon.handleRequests(5.0)
     finally:
