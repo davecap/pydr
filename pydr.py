@@ -1,8 +1,6 @@
 #!/usr/bin/python
 #
 # TODO:
-#   - keep track of state with sqlite or serialize manager object
-#   - get the client to run a specific job script
 #   - DR algorithm for getting next replica to run
 
 import os
@@ -15,6 +13,7 @@ import time
 import datetime
 import math
 import pickle
+import copy
 from xml.dom.minidom import parseString
 from string import Template
 from configobj import ConfigObj, flatten_errors
@@ -31,38 +30,41 @@ ch.setFormatter(formatter)
 log.addHandler(ch)
 
 class Snapshot(object):
-    # TODO: write snapshot
-    # what do we need to write:
-    #   - jobs (self.jobs)
-    #       - job id
-    #       - replica id
-    #       - job state (get_job_properties()['State'])
-    #   - replicas (self.replicas)
-    #       - id
-    #       - status
-    #       - uri
-    #       - job
-    #       - start_time
-    #       - end_time
-    #       - sequence
-    #   - server information
-    #       - status
-    #       - host
-    #       - ip
     def __init__(self, path):
         self.path = path
         
-    def load_jobs(self):
-        pass
+    def load_jobs(self, manager):
+        jobs = []
+        for j in self.jobs:
+            j.manager = manager
+            jobs.append(j)
+        return jobs
     
-    def load_replicas(self):
-        pass
-        
+    def load_replicas(self, manager):
+        replicas = {}
+        for r in self.replicas:
+            r.manager = manager
+            replicas[r.id] = r
+        return replicas
+            
     def save(self, manager):
-        pass
-        
-    def close(self):
-        pass
+        self.replicas = []
+        self.jobs = []
+        for r in manager.replicas.values():
+            r_copy = copy.copy(r)
+            # need to remove these references in order top pickle
+            r_copy.manager = None
+            r_copy.daemon = None
+            self.replicas.append(r_copy)
+        for j in manager.jobs:
+            j_copy = copy.copy(j)
+            j_copy.manager = None
+            self.jobs.append(j_copy)
+        log.debug('Saving snapshot to %s...' % self.path)
+        f = open(self.path, 'w')
+        pickle.dump(self, f)
+        f.close()
+        log.debug('Done saving snapshot')
 
 class Manager(Pyro.core.SynchronizedObjBase):           
     """
@@ -97,8 +99,8 @@ class Manager(Pyro.core.SynchronizedObjBase):
             self.snapshot = pickle.load(snapshotfile)
             snapshotfile.close()
             self.snapshot.path = snapshot_path
-            self.jobs = snapshot.load_jobs()
-            self.replicas = snapshot.load_replicas()
+            self.jobs = self.snapshot.load_jobs(self)
+            self.replicas = self.snapshot.load_replicas(self)
             for r_id, r_config in self.config['replicas'].items():
                 log.info('Validating/Connecting replica: %s' % (r_id))
                 if r_id not in self.replicas.keys():
@@ -155,7 +157,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
         if self.status == Manager.ACTIVE and seconds_remaining < float(self.config['server']['walltime'])/2.0:
             log.info('Server will transfer to the next client that connects...')
             self.status = Manager.TRANSFER
-            self.snapshot.close()
+            self.snapshot.save(self)
     
     def autosubmit(self):
         """ Submit replicas if necessary """
@@ -214,9 +216,9 @@ class Manager(Pyro.core.SynchronizedObjBase):
                 job = self.find_job_by_id(jobid)
                 if job:
                     log.info('Associating job %s with replica %s' % (jobid, r.id))
-                    job.replica = r
+                    job.replica_id = r.id
                     job.job_started()
-                    r.job = job
+                    r.job_id = jobid
                 else:
                     log.warning('Job sent invalid job id (%s). Will not associate it with a Replica' % jobid)
                 return r.uri_path
@@ -248,20 +250,20 @@ class Replica(Pyro.core.ObjBase):
         self.start_time = None
         self.timeout_time = None
         # current job running this replica
-        self.job = None
+        self.job_id = None
         
     def __repr__(self):
         return '<Replica %s:%s>' % (str(self.id), self.status)
     
     def start_run(self):
-        log.info('Starting run for replica %s-%s (job %s)' % (str(self.id), str(self.sequence), self.job))
+        log.info('Starting run for replica %s-%s (job %s)' % (str(self.id), str(self.sequence), self.job_id))
         self.start_time = datetime.datetime.now()
         self.timeout_time = self.start_time + datetime.timedelta(seconds=float(self.manager.config['client']['timeout']))
         self.status = self.RUNNING
     
     def end_run(self, return_code=0):
         # TODO: handle return code
-        log.info('Ending run for replica %s-%s (job %s)' % (str(self.id), str(self.sequence), self.job))
+        log.info('Ending run for replica %s-%s (job %s)' % (str(self.id), str(self.sequence), self.job_id))
         self.start_time = None
         self.timeout_time = None
         self.status = self.READY
@@ -297,7 +299,7 @@ python ${pydr_client_path} -l ${pydr_server} -p ${pydr_port} -j $PBS_JOBID
 
     def __init__(self, manager):
         self.manager = manager
-        self.replica = None
+        self.replica_id = None
         self.id = None
     
     def jobname(self):
