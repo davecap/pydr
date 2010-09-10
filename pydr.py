@@ -22,7 +22,7 @@ from validate import Validator
 import Pyro.core
 
 # setup logging
-log = logging.getLogger("pydr")
+log = logging.getLogger("pydr-lib")
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 ch = logging.StreamHandler()
 log.setLevel(logging.DEBUG)
@@ -283,8 +283,14 @@ class Job(object):
         
     DEFAULT_SUBMIT_SCRIPT_TEMPLATE = """
 #!/bin/bash
-#PBS -l nodes=${nodes}:ib:ppn=${ppn},walltime=${walltime}${pbs_extra}
+#PBS -l nodes=${nodes}:ppn=${ppn},walltime=${walltime}
 #PBS -N ${jobname}
+
+# -l nodes=${nodes}:ib:ppn=${ppn},walltime=${walltime}${pbs_extra}
+module load gcc/gcc-4.4.0
+module load python
+module load hdf5/184-p1-v18-serial
+source ~/ENV/bin/activate
 
 MPIFLAGS="${mpiflags}"
 
