@@ -23,11 +23,12 @@ def main():
     parser = optparse.OptionParser(usage)
     parser.add_option("-c", "--config", dest="config_file", default="config.ini", help="Config file [default: %default]")
     parser.add_option("-s", "--snapshot", dest="snapshot_file", default=None, help="Snapshot file [default: %default]")
-    parser.add_option("-t", "--start-time", dest="start_time", default=None, help="Start time in seconds [default: %default]")
+    parser.add_option("-t", "--start-time", dest="start_time", default=None, help="Job start time in seconds [default: %default]")
     
     (options, args) = parser.parse_args()
     
     config = pydr.setup_config(options.config_file)
+    # TODO: get server port from config
     
     # run the Manager in Pyro
     Pyro.core.initServer()
