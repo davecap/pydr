@@ -11,7 +11,7 @@ from threading import Thread
 import pydr
 
 # setup logging
-log = logging.getLogger("pydr-client")
+log = logging.getLogger("pydr")
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 ch = logging.StreamHandler()
 log.setLevel(logging.DEBUG)
