@@ -103,6 +103,8 @@ def main():
                     log.info('Ending run for replica %s' % str(replica['id']))
                     # TODO: handle exceptions
                     server.clear_replica(replica_id=replica['id'], job_id=options.job_id, return_code=run_process.poll())
+                    if run_process.poll() != 0:
+                        log.error('Replica returned non-zero code %d!' % run_process.poll())
                     replica = None
         
                 log.debug('Asking manager for a replica...')
@@ -276,8 +278,10 @@ class Manager(Pyro.core.SynchronizedObjBase):
         # if there arent enough jobs for each replica, submit some
         for i in range(num_replicas-jobs_running):
             j = Job(self)
-            self.jobs.append(j)
-            j.submit()
+            if j.submit():
+                self.jobs.append(j)
+            else:
+                log.warning('Job submission failed, not adding to job list')
             # sleep to prevent overloading the server
             time.sleep(1)
 
@@ -557,6 +561,9 @@ python ${pydr_client_path} -j $PBS_JOBID
         except:
             log.error('No job_id found in qsub output: %s' % out)
             self.id = None
+            return False
+        else:
+            return True
 
     def get_job_properties(self):
         if not self.id:
