@@ -32,7 +32,14 @@ log.addHandler(ch)
 
 class Snapshot(object):
     def __init__(self, path):
+        """ Load a snapshot data from a pickled Snapshot or just create a new object """
         self.path = path
+        if os.path.exists(path):
+            f = open(path, 'r')
+            snapshot = pickle.load(f)
+            f.close()
+            self.jobs = snapshot.jobs
+            self.replicas = snapshot.replicas            
         
     def load_jobs(self, manager):
         jobs = []
@@ -67,242 +74,8 @@ class Snapshot(object):
         f.close()
         log.debug('Done saving snapshot')
 
-class Manager(Pyro.core.SynchronizedObjBase):
-    """
-    The Manager class is the class shared by Pyro. It handles jobs, nodes and replicas.
-    """
-    
-    # manager status
-    ACTIVE = 1      # server is running
-    INACTIVE = 0    # server is inactive, send clients to new server
-    
-    def __init__(self, config, daemon):
-        Pyro.core.SynchronizedObjBase.__init__(self)
-        
-        # jobs[<job id>] = Job()
-        self.jobs = []
-        # replicas[<replica id>] = Replica()
-        self.replicas = {}
-        self.config = config
-        self.last_snapshot_time = 0     # last time a snapshot was made
-        # details about mobile server
-        self.status = Manager.ACTIVE
-        self.server_host = daemon.hostname
-        self.server_port = daemon.port
-        
-        snapshot_path = os.path.join(self.project_path(), self.config['server']['snapshotfile'])
-                
-        # load from snapshot if one is found
-        if os.path.exists(snapshot_path):
-            log.info('Loading snapshot from %s' % (snapshot_path))
-            snapshotfile = open(snapshot_path, 'r')
-            self.snapshot = pickle.load(snapshotfile)
-            snapshotfile.close()
-            self.snapshot.path = snapshot_path
-            self.jobs = self.snapshot.load_jobs(self)
-            self.replicas = self.snapshot.load_replicas(self)
-            for r_id, r_config in self.config['replicas'].items():
-                log.info('Validating/Connecting replica: %s' % (r_id))
-                if r_id not in self.replicas.keys():
-                    raise Exception('Replica %s found in config but not in snapshot!' % str(r_id))
-                for c in r_config.keys():
-                    if c not in self.replicas[r_id].options.keys():
-                        raise Exception('Mismatch between snapshot and config replica options: %s vs %s' % (self.replicas[r_id].options.keys(), r_config.keys()))
-            log.info('Snapshot loaded successfuly')
-        else:
-            # initialize a new snapshot
-            self.snapshot = Snapshot(snapshot_path)
-            # loop through replicas in the config file
-            for r_id, r_config in self.config['replicas'].items():
-                log.info('Adding replica: %s -> %s' % (r_id, r_config))
-                # create new Replica objects
-                r = Replica(manager=self, id=r_id, options=r_config)
-                self.replicas[r.id] = r
-        
-        if not len(self.replicas.items()):
-            raise Exception('No replicas found in config file... exiting!')
-        else:
-            # connect the replicas to the daemon
-            for r_id, r in self.replicas.items():
-                r.uri_path = 'replica/%s' % r_id
-                r.uri = daemon.connect(r, r.uri_path)  
-        if not self.config['server']['autosubmit']:
-            log.info('Autosubmit is off, not submitting replicas')
-            return
-    
-    def project_path(self):
-        return os.path.abspath(os.path.dirname(self.config.filename))
-    
-    def maintain(self, timedelta):
-        """ Maintenance code that runs between daemon.handleRequests() calls """
-        if self.status == Manager.INACTIVE:
-            log.debug('Skipping maintenance, in transfer mode...')
-            return
-        
-        # always try running autosubmit regardless of timedelta
-        self.autosubmit()
-        
-        # calculate total number of seconds
-        seconds_since_start = timedelta.seconds + timedelta.days*24*60*60
-        seconds_remaining = self.config['server']['walltime'] - seconds_since_start
-        
-        if (seconds_since_start/self.config['server']['snapshottime']) <= (self.last_snapshot_time/self.config['server']['snapshottime']):
-            #log.debug('Not writing a snapshot... snapshottime interval not reached')
-            pass
-        else:
-            self.last_snapshot_time = seconds_since_start
-            log.info('Saving server snapshot...')
-            self.snapshot.save(self)
-            log.info('Done saving server snapshot...')
-        
-        # should we submit a new server?
-        # if time left is less than half the walltime, submit a new server
-        if self.status == Manager.ACTIVE and seconds_remaining < float(self.config['server']['walltime'])/2.0:
-            log.info('Transferring server to youngest client')
-            job = self.get_youngest_job()
-            if job is None:
-                log.error('No youngest job found for server transfer!')
-            else:
-                self.snapshot.save(self)
-                # connect to the client
-                try:
-                    client = Pyro.core.getProxyForURI(job.uri)
-                    (client_host, client_port) = client.start_server()
-                    # now set the server to inactive
-                    self.status = Manager.INACTIVE
-                    self.server_host = client_host
-                    self.server_port = client_port
-                except ProtocolError:
-                    log.error('Could not connect to youngest client (%s)' % job.uri)
-                    
-        # loop through all FREE jobs and send out replicas
-        free_jobs = [ j for j in self.jobs if j.status == Job.FREE ]
-        log.info('%d free jobs.' % len(free_jobs))
-        
-        for job in free_jobs:
-            # connect to the job/client using its URI
-            client = Pyro.core.getProxyForURI(job.uri)
-            # see if we should forward the client
-            if self.status == Manager.INACTIVE:
-                log.info('Manager is inactive, forwarding client to new host (%s:%s)' % (self.server_host, self.server_port))
-                try:
-                    client.set_server(self.server_host, self.server_port)
-                except ProtocolError:
-                    log.error('Could not connect to client: %s' % job.uri)
-            else:
-                # this manager is active... look for a replica
-                replica = self.get_next_replica()
-                if replica is not None:
-                    job.status = Job.BUSY
-                    job.replica_id = replica.id
-                    replica.job_id = job.id
-                    log.info('Sending replica %s to client with job id %s' % (replica.id, job.id))
-                    try:
-                        client.run_replica_by_uri_path(replica.uri_path)
-                    except ProtocolError:
-                        log.error('Could not connect to client: %s' % job.uri)
-                else:
-                    log.info('No replicas are ready to run...')
-                    break
-
-    
-    def autosubmit(self):
-        """ Submit replicas if necessary """
-        if not self.config['server']['autosubmit']:
-            return
-        
-        # look for any timed-out replicas
-        now = datetime.datetime.now()
-        for r_id, r in self.replicas.items():
-            if r.status == Replica.RUNNING and now >= r.timeout_time:
-                log.error('Replica %s timed-out, ending the run' % r_id)
-                r.end_run(return_code=1)
-                # TODO: check on the job?
-        
-        # get the number of replicas
-        num_replicas = len(self.replicas.keys())
-        jobs_running = 0
-        for j in self.jobs:
-            if not j.completed():
-                jobs_running += 1
-        
-        # if there arent enough jobs for each replica, submit some
-        for i in range(num_replicas-jobs_running):
-            j = Job(self)
-            self.jobs.append(j)
-            j.submit()
-            # sleep to prevent overloading the server
-            time.sleep(1)
-                
-    def show_replicas(self):
-        """ Print the status of all replicas """
-        for r in self.replicas.values():
-            log.info('%s' % r)
-     
-    def set_replica_status(self, replica, status):
-        r = self.replicas[replica.id].status = status
-    
-    # TODO: maybe also make a dict for this? probably not a bit deal at the moment
-    def find_job_by_id(self, job_id):
-        for j in self.jobs:
-            if str(j.id) == str(job_id):
-                return j
-        return None
-    
-    def get_youngest_job(self):
-        """ Get the job with the greatest time left """
-        # only active jobs!
-        active_jobs = [ j for j in self.jobs if not j.completed() and j.uri is not None ]
-        if len(active_jobs) == 0:
-            log.warning('No jobs are active...')
-            return None
-        else:
-            sorted_jobs = sorted(active_jobs, key=lambda j: j.start_time)
-            return sorted_jobs[-1]
-    
-    # TODO: override this for DR
-    def get_next_replica(self):
-        """ Get the next replica to run by calling this """
-        self.show_replicas()
-        for r in self.replicas.values():
-            if r.status == Replica.READY:
-                log.info('Replica ready: %s' % r)
-                return r
-        log.warning('No replicas ready to run')
-        return None
-    
-    #
-    # Client calls to Manager
-    #
-    
-    def ping(self, job_id):
-        """ Client pings the server when it has nothing to do """
-        log.info('Job %s just pinged server!' % str(job_id))        
-        job = self.find_job_by_id(job_id)
-        if job is None:
-            log.error('Client with invalid job_id (%s) pinged the server!' % (job_id))
-            return
-        # set the job to free
-        job.status = Job.FREE
-        
-    def connect(self, job_id, uri):
-        """ Clients will FIRST connect to the manager using connect()
-            They will send their job_id and a uri to connect back.
-        """
-        log.info('Job %s just connected to server!' % str(job_id))        
-        job = self.find_job_by_id(job_id)
-        # TODO: replace with find_or_create_job??
-        if job is None:
-            log.error('Job sent unknown job id (%s), creating new job' % job_id)                
-            job = Job(self)
-            job.id = job_id
-            self.jobs.append(job)
-        # this should be the first time a job is connecting
-        log.info('Associating client URI %s with job %s' % (uri, job_id))
-        job.connected(uri)
-
 # Subclass Replica to handle different simulation packages and systems?
-class Replica(Pyro.core.SynchronizedObjBase):
+class Replica(Pyro.core.ObjBase):
     """
     The Replica class represents an individual replica that is run on a node.
     It contains all the information necessary for a new job to run a replica on a node.
@@ -315,7 +88,7 @@ class Replica(Pyro.core.SynchronizedObjBase):
     FINISHED = 'finished'   # replica finished running
 
     def __init__(self, manager, id, options={}):
-        Pyro.core.SynchronizedObjBase.__init__(self)
+        Pyro.core.ObjBase.__init__(self)
         
         self.manager = manager
         self.id = id
@@ -343,6 +116,7 @@ class Replica(Pyro.core.SynchronizedObjBase):
         self.start_time = None
         self.timeout_time = None
         self.status = self.READY
+        return True
     
     def environment_variables(self):
         self.options.update({'replica':str(self.id), 'sequence': str(self.sequence)})
@@ -356,11 +130,6 @@ class Job(object):
     """
     The Job class represents a job running through the cluster queue system.
     """
-    
-    # job status
-    BUSY = 1
-    FREE = 0
-    COMPLETE = -1
         
     DEFAULT_SUBMIT_SCRIPT_TEMPLATE = """
 #!/bin/bash
@@ -374,7 +143,8 @@ MPIFLAGS="${mpiflags}"
 
 cd $job_dir
 
-python ${pydr_client_path} -l ${pydr_server} -p ${pydr_port} -j $PBS_JOBID
+# python ${pydr_client_path} -l ${pydr_server} -p ${pydr_port} -j $PBS_JOBID
+python ${pydr_client_path} -j $PBS_JOBID
 
 """
 
@@ -385,17 +155,14 @@ python ${pydr_client_path} -l ${pydr_server} -p ${pydr_port} -j $PBS_JOBID
         self.uri = None # the URI of the client for this job
         self.start_time = 0
         self.predicted_end_time = 0
-        self.status = Job.FREE
     
     def jobname(self):
         return 'pydrjob'
         
-    def connected(self, uri):
-        """ Called when a job connects to the server for the first time """
+    def reset(self, uri):
         self.start_time = datetime.datetime.now()
         # end time should be start time + walltime
         self.predicted_end_time = self.start_time + datetime.timedelta(seconds=float(self.manager.config['client']['walltime']))
-        self.status = Job.FREE
         self.uri = uri
         
     def make_submit_script(self, options={}):
@@ -503,10 +270,7 @@ python ${pydr_client_path} -l ${pydr_server} -p ${pydr_port} -j $PBS_JOBID
     def completed(self):
         """ Assume job did start, so if the checkjob never heard of this job it must already have finished. """
         # look at walltime
-        if self.status == Job.COMPLETE:
-            return True
-        elif datetime.datetime.now() >= self.predicted_end_time:
-            self.status = Job.COMPLETE
+        if datetime.datetime.now() >= self.predicted_end_time:
             return True
         else:
             return False
@@ -527,86 +291,6 @@ python ${pydr_client_path} -l ${pydr_server} -p ${pydr_port} -j $PBS_JOBID
             log.info('Cancelling job %s' % self.id)
             process = subprocess.Popen('qdel %s' % (self.id,), shell=True, stdout=PIPE, stderr=PIPE)
             (out,err) = process.communicate()
-            self.status = Job.COMPLETE
-
-#
-# Client
-#
-
-class Client(Pyro.core.SynchronizedObjBase):           
-    """ The Client object is run from the client, the manager connects to it to run things! """
-    
-    def __init__(self, daemon, job_id):
-        Pyro.core.SynchronizedObjBase.__init__(self)
-        
-        self.client_host = daemon.hostname
-        self.client_port = daemon.port
-        self.uri = "PYROLOC://%s:%s/client" % (self.client_host, self.client_port)
-        if job_id == "": job_id = None
-        self.job_id = job_id
-        
-        # start_time: basically the time at which the client's job started running.
-        #             This is used if/when a server is launched by the client,
-        #             to know when the server's walltime will be reached
-        self.start_time = time.time()
-        # if the client launches a server, this is the process it will interact with
-        self.server_process = None
-        # the process of some program running under this client
-        self.run_process = None
-        self.replica_uri_path = None
-    
-    def ping_manager(self):
-        """ Connect to the server. The server will tell this client what to do next """
-        if self.run_process is None:
-            log.debug('Pinging manager...')
-            try:
-                self.manager.ping(self.job_id)
-            except ProtocolError:
-                log.warning("Connection to manager failed...")
-      
-    def start_server(self):
-        log.info('Manager wants to transfer to client, starting new server')
-        server_path = os.path.abspath(__file__).replace('client.py','server.py')                
-        config_path = os.path.abspath(self.manager.config.filename)
-        snapshot_path = os.path.abspath(self.manager.snapshot.path)
-        command = 'python %s -c "%s" -s "%s" -t "%s"' % (server_path, config_path, snapshot_path, str(self.start_time))
-        split_command = shlex.split(command)
-        self.server_process = subprocess.Popen(split_command)
-        log.info('Server is now running on client machine')
-        return (self.client_host, self.client_port)
-    
-    def set_server(self, new_server_host, new_server_port):
-        log.info('Client setting server to host/port: %s:%s' % (new_server_host, new_server_port))
-        self.server_host = new_server_host
-        self.server_port = new_server_port
-        self.manager = Pyro.core.getAttrProxyForURI("PYROLOC://%s:%s/manager" % (self.server_host, self.server_port))
-        self.manager._setTimeout(10)
-        self.manager.connect(self.job_id, self.uri)
-        
-    # Note: it is impossible for this to be called with an invalid server_host and server_port
-    # it will always be called from Manager.connect()
-    def run_replica_by_uri_path(self, replica_uri_path):
-        self.replica_uri_path = replica_uri_path
-        self.run_process = None
-        log.info('Client got replica uri %s' % self.replica_uri_path)
-        
-    def run_subprocess(self):
-        if self.replica_uri_path is not None:
-            replica = Pyro.core.getAttrProxyForURI("PYROLOC://%s:%s/%s" % (self.server_host, self.server_port, self.replica_uri_path))
-            if self.run_process is not None:
-                # a local job is or was running
-                if self.run_process.poll() is not None:
-                    # if the job not running anymore... end it
-                    log.info('Ending run for replica at %s' % self.replica_uri_path)
-                    replica.end_run(self.run_process.poll())
-                    self.run_process = None
-                    self.replica_uri_path = None
-            else:
-                log.info('Running replica %s-%s' % (str(replica.id), str(replica.sequence)))
-                log.info('Environment variables: %s' % str(replica.environment_variables()))
-                replica.start_run()
-                self.run_process = subprocess.Popen(replica.command(), env=replica.environment_variables())
-                self.run_process.wait()
 
 
 #
@@ -628,6 +312,7 @@ title = string(default='My DR')
 # DR server settings
 [server]
     port = integer(min=1024, max=65534, default=7766)
+    hostfile = string(default='hostfile')
     autosubmit = boolean(default=True)
     walltime = integer(min=1, max=999999, default=86400)
     snapshottime = integer(min=1, max=999999, default=3600)
@@ -680,13 +365,13 @@ title = string(default='My DR')
 # END
 """
 
-def setup_config(path='config.ini'):
+def setup_config(path='config.ini', create=False):
     # validate the config
     config = ConfigObj(path, configspec=PYDR_CONFIG_SPEC.split("\n"))
     validator = Validator()
 
     # create config file with defaults if necessary
-    if not os.path.exists(path):
+    if create and not os.path.exists(path):
         log.info('Creating new config file: %s' % path)
         config.validate(validator, copy=True)
         config.filename = path
