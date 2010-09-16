@@ -197,7 +197,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
             self.snapshot = Snapshot(self.snapshot_path)
             # loop through replicas in the config file
             for r_id, r_properties in self.config['replicas'].items():
-                log.info('Adding replica: %s -> %s' % (r_id, r_config))
+                log.info('Adding replica: %s -> %s' % (r_id, r_properties))
                 # create new Replica objects
                 r = Replica(manager=self, id=r_id, properties=r_properties)
                 self.replicas[r.id] = r
