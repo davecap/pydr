@@ -265,7 +265,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
         for r_id, r in self.replicas.items():
             if r.status == Replica.RUNNING and now >= r.timeout_time:
                 log.error('Replica %s timed-out, ending the run' % r_id)
-                r.end_run(return_code=1)
+                r.stop(return_code=1)
                 # TODO: check on the job?
 
         # get the number of replicas
@@ -326,15 +326,16 @@ class Manager(Pyro.core.SynchronizedObjBase):
             log.error('Client with invalid job_id (%s) pinged the server!' % (job_id))
         else:
             self.show_replicas()
-            for r in self.replicas.values():
-                if r.status == Replica.READY:
-                    log.info('Replica ready: %s' % r)
-                    job.replica_id = r.id
-                    r.job_id = job.id
-                    log.info('Sending replica %s to client with job id %s' % (r.id, job.id))
-                    r.start_run()
-                    return r.environment_variables()
-            log.warning('No replicas ready to run')
+            # Replica selection algorithm
+            r = RSARandom.select(self.replicas)
+            if r is not None:
+                log.info('Sending replica %s to client with job id %s' % (r.id, job.id))
+                job.replica_id = r.id
+                r.job_id = job.id
+                r.start()
+                return r.environment_variables()
+            else:
+                log.warning('No replicas ready to run')
         return None
     
     def clear_replica(self, replica_id, job_id, return_code):
@@ -346,7 +347,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
         elif replica_id not in self.replicas:
             log.error('Job %s trying to clear unknown replica %s!' % (str(job_id), str(replica_id)))
         else:
-            return self.replicas[replica_id].end_run(return_code)
+            return self.replicas[replica_id].stop(return_code)
         return False
 
 class Snapshot(object):
@@ -423,18 +424,19 @@ class Replica(Pyro.core.ObjBase):
     def __repr__(self):
         return '<Replica %s:%s>' % (str(self.id), self.status)
     
-    def start_run(self):
+    def start(self):
         log.info('Starting run for replica %s-%s (job %s)' % (str(self.id), str(self.sequence), self.job_id))
         self.start_time = datetime.datetime.now()
         self.timeout_time = self.start_time + datetime.timedelta(seconds=float(self.manager.config['client']['timeout']))
         self.status = self.RUNNING
     
-    def end_run(self, return_code=0):
+    def stop(self, return_code=0):
         # TODO: handle return code
         log.info('Ending run for replica %s-%s (job %s)' % (str(self.id), str(self.sequence), self.job_id))
         self.start_time = None
         self.timeout_time = None
         self.status = self.READY
+        self.sequence += 1
         return True
     
     def environment_variables(self):
@@ -453,7 +455,7 @@ class Job(object):
     DEFAULT_SUBMIT_SCRIPT_TEMPLATE = """
 #!/bin/bash
 #PBS -l nodes=${nodes}:ib:ppn=${ppn},walltime=${walltime}${pbs_extra}
-#PBS -N ${jobname}
+#PBS -N ${job_name}
 
 MPIFLAGS="${mpiflags}"
 
@@ -475,8 +477,8 @@ python ${pydr_client_path} -j $PBS_JOBID
         self.predicted_end_time = 0
         self.started = False
     
-    def jobname(self):
-        return 'pydrjob'
+    def job_name(self):
+        return self.manager.config['client']['job_name_prefix']
         
     def start(self):
         self.start_time = datetime.datetime.now()
@@ -492,7 +494,7 @@ python ${pydr_client_path} -j $PBS_JOBID
                         'walltime': self.manager.config['client']['walltime'],
                         #'pbs_extra': self.manager.config['client']['pbs_extra'],
                         'pbs_extra': ['os=centos53computeA'],
-                        'jobname': self.jobname(),
+                        'job_name': self.job_name(),
                         'mpiflags': self.manager.config['client']['mpiflags'],
                         'job_dir': self.manager.project_path,
                         'pydr_client_path': os.path.abspath(os.path.dirname(__file__)),
@@ -608,9 +610,26 @@ python ${pydr_client_path} -j $PBS_JOBID
             process = subprocess.Popen('qdel %s' % (self.id,), shell=True, stdout=PIPE, stderr=PIPE)
             (out,err) = process.communicate()
 
+#
+# Replica Selection Algorithms
+#
+
+class RSA(object):
+    def select(replicas):
+        raise NotImplementedError('Select function not implemented in RSA subclass')
+
+class RSARandom(object):
+    def select(replicas):
+        replica_list = replicas.values()
+        replica_list.shuffle()
+        for r in replica_list:
+            if r.status == Replica.READY:
+                log.info('RSARandom selected replica: %s' % str(r.id))
+                return r
+        return None
 
 #
-# Config Spec
+# Config Specification
 #
 
 PYDR_CONFIG_SPEC = """#
