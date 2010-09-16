@@ -39,7 +39,7 @@ def server_listener(daemon, manager, start=False):
             if manager.shutdown:
                 break
             manager.maintain()
-            daemon.handleRequests(10.0)
+            daemon.handleRequests(20.0)
     finally:
         log.info('Server shutting down...')
         daemon.shutdown(True)
@@ -67,7 +67,7 @@ def main():
     
     thread = Thread(target=server_listener, args=(daemon, manager, options.start_server))
     thread.start()
-    time.sleep(1)
+    time.sleep(5)
     
     log.debug('Starting client loop...')
     replica = None
@@ -122,7 +122,7 @@ def main():
                 else:
                     log.error('Client did not get a replica from the server')
             finally:
-                time.sleep(2)
+                time.sleep(5)
         # end client loop
     finally:
         manager.stop()
