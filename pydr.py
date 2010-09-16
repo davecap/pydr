@@ -447,7 +447,7 @@ class Replica(Pyro.core.ObjBase):
     
     def command(self):
         """ Get the actual code that runs the replica on the client node """
-        return ['/bin/sh', self.manager.config['job']['script']]
+        return ['/bin/sh', self.manager.config['job']['run_script']]
 
 class Job(object):
     """
@@ -466,7 +466,7 @@ MPIFLAGS="${mpiflags}"
 
 cd $job_dir
 
-python ${pydr_client_path} -j $PBS_JOBID
+python ${pydr_path} -j $PBS_JOBID
 
 """
 
@@ -490,7 +490,14 @@ python ${pydr_client_path} -j $PBS_JOBID
         
     def make_submit_script(self, options={}):
         """ Generate a submit script from the template """
-        s = Template(self.DEFAULT_SUBMIT_SCRIPT_TEMPLATE)
+        
+        if os.path.exists(self.manager.config['job']['submit_script']):
+            f = open(self.manager.config['job']['submit_script'], 'r')
+            s = Template(f.read())
+            f.close()
+        else:
+            s = Template(self.DEFAULT_SUBMIT_SCRIPT_TEMPLATE)
+            
         defaults = {    'nodes': self.manager.config['job']['nodes'],
                         'ppn': self.manager.config['job']['ppn'],
                         'walltime': self.manager.config['job']['walltime'],
@@ -499,8 +506,7 @@ python ${pydr_client_path} -j $PBS_JOBID
                         'job_name': self.job_name(),
                         'mpiflags': self.manager.config['job']['mpiflags'],
                         'job_dir': self.manager.project_path,
-                        'pydr_client_path': os.path.abspath(os.path.dirname(__file__)),
-                        'pydr_server_path': os.path.abspath(os.path.dirname(__file__)),
+                        'pydr_path': os.path.abspath(os.path.dirname(__file__)),
                     }
         
         defaults.update(options)
@@ -509,7 +515,7 @@ python ${pydr_client_path} -j $PBS_JOBID
             defaults['pbs_extra'] = ','+','.join(defaults['pbs_extra'])
         else:
             defaults['pbs_extra'] = ''
-        defaults['pydr_client_path'] = os.path.join(defaults['pydr_client_path'], 'client.py')
+        defaults['pydr_path'] = os.path.join(defaults['pydr_path'], 'pydr.py')
         
         # have to format walltime from seconds to HH:MM:SS
         # TODO: this is horrible... I couldn't figure out how to get this done properly with python
@@ -683,11 +689,13 @@ title = string(default='My DR')
     mpiflags = string(default='-mca btl_sm_num_fifos 7 -mca mpi_paffinity_alone 1 -mca btl_openib_eager_limit 32767 -np $(wc -l $PBS_NODEFILE | gawk \'{print $1}\') -machinefile $PBS_NODEFILE')
     # timeout before server resubmits a job
     timeout = integer(min=0, max=999999, default=10000)
-
+    # job submit script
+    submit_script = string(default='submit.sh')
+    
     # this script is executed by the client for each replica
     # it defaults to run.sh (located in the same directory as config.ini)
     # replica variables are passed to this script via the client
-    script = string(default='run.sh')
+    run_script = string(default='run.sh')
     
     # files section will be used in the near future
     # [[files]]
