@@ -1,4 +1,4 @@
-test/*
-
 *.pyc
+*.pdb
+*.psf
 

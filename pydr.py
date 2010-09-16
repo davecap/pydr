@@ -85,7 +85,7 @@ def main():
             f = open(manager.hostfile, 'r')
             server_uri = f.readline()
             f.close()
-                        
+            
             # connect to server: job_id, time_left, manager_uri
             server = Pyro.core.getProxyForURI(server_uri)
             server._setTimeout(1)
