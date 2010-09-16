@@ -196,10 +196,10 @@ class Manager(Pyro.core.SynchronizedObjBase):
             # initialize a new snapshot
             self.snapshot = Snapshot(self.snapshot_path)
             # loop through replicas in the config file
-            for r_id, r_config in self.config['replicas'].items():
+            for r_id, r_properties in self.config['replicas'].items():
                 log.info('Adding replica: %s -> %s' % (r_id, r_config))
                 # create new Replica objects
-                r = Replica(manager=self, id=r_id, options=r_config)
+                r = Replica(manager=self, id=r_id, properties=r_properties)
                 self.replicas[r.id] = r
 
         if not len(self.replicas.items()):
@@ -408,20 +408,20 @@ class Replica(Pyro.core.ObjBase):
     ERROR = 'error'         # replica sent an error
     FINISHED = 'finished'   # replica finished running
 
-    def __init__(self, manager, id, options={}):
+    def __init__(self, manager, id, properties={}):
         Pyro.core.ObjBase.__init__(self)
         
         self.manager = manager
-        self.id = id
         self.status = self.READY
-        self.uri = None
-        self.sequence = 0
-        self.options = options
         self.start_time = None
         self.timeout_time = None
         # current job running this replica
         self.job_id = None
-        
+        # replica properties
+        self.properties = properties
+        self.id = id
+        self.sequence = -1
+    
     def __repr__(self):
         return '<Replica %s:%s>' % (str(self.id), self.status)
     
@@ -430,6 +430,7 @@ class Replica(Pyro.core.ObjBase):
         self.start_time = datetime.datetime.now()
         self.timeout_time = self.start_time + datetime.timedelta(seconds=float(self.manager.config['job']['timeout']))
         self.status = self.RUNNING
+        self.sequence += 1
     
     def stop(self, return_code=0):
         # TODO: handle return code
@@ -437,12 +438,12 @@ class Replica(Pyro.core.ObjBase):
         self.start_time = None
         self.timeout_time = None
         self.status = self.READY
-        self.sequence += 1
         return True
     
     def environment_variables(self):
-        self.options.update({'id': str(self.id), 'sequence': str(self.sequence)})
-        return self.options
+        current_properties = self.properties
+        current_properties.update({'id': str(self.id), 'sequence': str(self.sequence)})
+        return current_properties
     
     def command(self):
         """ Get the actual code that runs the replica on the client node """
@@ -615,7 +616,7 @@ python ${pydr_client_path} -j $PBS_JOBID
 # Replica Selection Algorithms
 #
 
-class RSA(object):
+class RSABase(object):
     """ Base Replica Selection Algorithm (RSA) """
     def __init__(self):
         pass
@@ -623,7 +624,7 @@ class RSA(object):
     def select(self, replicas):
         raise NotImplementedError('Select function not implemented in RSA subclass')
 
-class RSARandom(object):
+class RSARandomReplica(RSABase):
     """ Random replica selection algorithm """
     def select(self, replicas):
         import random
@@ -631,8 +632,13 @@ class RSARandom(object):
         random.shuffle(replica_list)
         for r in replica_list:
             if r.status == Replica.READY:
-                log.info('RSARandom selected replica: %s' % str(r.id))
+                log.info('RSARandomReplica selected replica: %s' % str(r.id))
                 return r
+        return None
+
+class RSADistributedReplica(RSABase):
+    """ Distributed replica selection algorithm """
+    def select(self, replicas):
         return None
 
 #
@@ -661,7 +667,7 @@ title = string(default='My DR')
     # file name of snapshot file
     snapshotfile = string(default='snapshot.pickle')
     # replica selection algorithm
-    replica_selection_class = string(default='RSARandom')
+    replica_selection_class = string(default='RSARandomReplica')
 
 # Job-specific configuration
 [job]
