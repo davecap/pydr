@@ -537,25 +537,10 @@ python ${pydr_path} -j $PBS_JOBID
         """ Submit a job using qsub """
         
         log.info('Submitting job...')
-        
-        # by default jobs start right away... start_time/end_time will be overwritten later
-        # TODO: this could be bad!
-        # self.job_started()
-        
         # note: client will send the job_id back to server to associate a replica with a job
-        
-        # $PBS_JOBID
-        # $PBS_O_WORKDIR
         qsub_path = self.manager.config['system']['qsub']
-
         (fd, f_abspath) = tempfile.mkstemp()
         os.write(fd, self.make_submit_script())
-        # print >>f, job_string
-        # print >>f, """
-        # 
-        # """
-        #print self.make_submit_script()
-
         log.info('Submit script file: %s' % f_abspath)
         process = subprocess.Popen([qsub_path, f_abspath], shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         returncode = process.returncode
@@ -563,10 +548,8 @@ python ${pydr_path} -j $PBS_JOBID
         log.info('Job submit stdout: %s' % out)
         log.info('Job submit stderr: %s' % err)
         
-        # qsub returns "<job_id>.gpc-sched"
         try:
             self.id = out.split('.')[0]
-            # if this fails, the job id is invalid
             int(job_id)
         except:
             log.error('No job_id found in qsub output: %s' % out)
