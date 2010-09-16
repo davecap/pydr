@@ -1,0 +1,58 @@
+# PyDR Config File
+
+# set a title for this setup
+title = My DR
+
+# Paths to system programs
+[system]
+    qsub = qsub
+    checkjob = checkjob
+
+# Manager (server) settings
+[manager]
+    port = 7766
+    # Name of the file containing the Pyro address of the manager
+    hostfile = hostfile
+    # Automatically submit (qsub) jobs as required when the manager is launched
+    autosubmit = True
+    # approximate time interval in seconds for saving snapshots
+    snapshottime = 3600
+    # file name of snapshot file
+    snapshotfile = snapshot.pickle
+    # replica selection algorithm
+    replica_selection_class = RSARandom
+
+# Job-specific configuration
+[job]
+    name = myjob
+    # PBS submit script options
+    # processors per node
+    ppn = 1
+    # nodes per job
+    nodes = 1
+    # walltime in seconds
+    walltime = 86400
+    # MPI flags set within the script
+    mpiflags = -mca btl_sm_num_fifos 7 -mca mpi_paffinity_alone 1 -mca btl_openib_eager_limit 32767 -np $(wc -l $PBS_NODEFILE | gawk '{print $1}') -machinefile $PBS_NODEFILE
+    # timeout before server resubmits a job
+    timeout = 10000
+    
+    # this script is executed by the client for each replica
+    # it defaults to run.sh (located in the same directory as config.ini)
+    # replica variables are passed to this script via the client
+    script = run.sh
+
+# Replica settings
+[replicas]
+    # each replica is listed here numbered from 0 to N
+    [[0]]
+        k = 0.1
+        coordinate = 10
+    [[1]]
+        k = 0.1
+        coordinate = 20
+    # [[2]]
+    #     k = 0.1
+    #     coordinate = 30
+
+# END

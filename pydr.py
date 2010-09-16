@@ -1,7 +1,4 @@
 #!/usr/bin/python
-#
-# TODO:
-#   - DR algorithm for getting next replica to run
 
 import os
 import optparse
@@ -62,7 +59,7 @@ def main():
     config = setup_config(options.config_file, create=True)
     
     Pyro.core.initServer()
-    daemon = Pyro.core.Daemon(port=int(config['server']['port']))
+    daemon = Pyro.core.Daemon(port=int(config['manager']['port']))
     manager = Manager(config, daemon, options.job_id)
     manager_uri = daemon.connect(manager, 'manager')
     log.info('The daemon is running at: %s:%s' % (daemon.hostname, daemon.port))
@@ -99,10 +96,11 @@ def main():
             else:
                 # see if we need to close a replica that just finished
                 if replica is not None:
+                    (command, env) = replica
                     # get the replica by its ID
-                    log.info('Ending run for replica %s' % str(replica['id']))
+                    log.info('Ending run for replica %s' % str(env['id']))
                     # TODO: handle exceptions
-                    server.clear_replica(replica_id=replica['id'], job_id=options.job_id, return_code=run_process.poll())
+                    server.clear_replica(replica_id=env['id'], job_id=options.job_id, return_code=run_process.poll())
                     if run_process.poll() != 0:
                         log.error('Replica returned non-zero code %d!' % run_process.poll())
                     replica = None
@@ -113,14 +111,12 @@ def main():
             
                 # if the server returns a replica
                 if replica:
+                    (command, env) = replica
                     # res contains the replica environment variables
-                    log.info('Client running replica %s' % replica['id'])
-                    log.info('Environment variables: %s' % replica)
+                    log.info('Client running replica %s' % env['id'])
+                    log.info('Environment variables: %s' % env)
                     # run the replica
-                    # TODO: clean this up
-                    command = replica['command']
-                    del replica['command']
-                    run_process = subprocess.Popen(command, env=replica)
+                    run_process = subprocess.Popen(command, env=env)
                     # now just wait until the job is done
                     run_process.wait()
                 else:
@@ -156,17 +152,21 @@ class Manager(Pyro.core.SynchronizedObjBase):
         # last time a snapshot was made
         self.last_snapshot_time = 0
         # snapshot file path
-        self.snapshot_path = os.path.join(self.project_path, self.config['server']['snapshotfile'])
+        self.snapshot_path = os.path.join(self.project_path, self.config['manager']['snapshotfile'])
         # details about mobile server
         self.active = False
         # time this is run! (used in maintenance code)
         self.init_time = datetime.datetime.now()
         # host file path
-        self.hostfile = os.path.join(self.project_path, self.config['server']['hostfile'])
+        self.hostfile = os.path.join(self.project_path, self.config['manager']['hostfile'])
         # tell the server to shutdown on maintenance if this is true
         self.shutdown = False
+        # load the replica selection algorithm class
+        log.info('Loading replica selection algorithm class %s...' % self.config['manager']['replica_selection_class'])
+        self.rsa_class = globals()[self.config['manager']['replica_selection_class']]()
     
     def stop(self):
+        # TODO: there must be a better way. Use signals to kill the manager listener thread?
         self.shutdown = True
     
     def start(self):
@@ -218,9 +218,9 @@ class Manager(Pyro.core.SynchronizedObjBase):
         timedelta = datetime.datetime.now()-self.init_time
         # calculate total number of seconds
         seconds_since_start = timedelta.seconds + timedelta.days*24*60*60
-        seconds_remaining = self.config['server']['walltime'] - seconds_since_start
+        seconds_remaining = self.config['job']['walltime'] - seconds_since_start
 
-        if (seconds_since_start/self.config['server']['snapshottime']) > (self.last_snapshot_time/self.config['server']['snapshottime']):
+        if (seconds_since_start/self.config['manager']['snapshottime']) > (self.last_snapshot_time/self.config['manager']['snapshottime']):
             # write a snapshot
             self.last_snapshot_time = seconds_since_start
             self.snapshot.save(self)
@@ -230,7 +230,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
 
         # should we submit a new server?
         # if time left is less than half the walltime, submit a new server
-        if self.active and seconds_remaining < float(self.config['server']['walltime'])/2.0:
+        if self.active and seconds_remaining < float(self.config['job']['walltime'])/2.0:
             log.info('MAINTENANCE: Server attempting to transfer...')
             sorted_jobs = sorted(active_jobs, key=lambda j: j.start_time)
             if sorted_jobs == []:
@@ -257,7 +257,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
 
     def autosubmit(self):
         """ Submit replicas if necessary """
-        if not self.config['server']['autosubmit']:
+        if not self.config['manager']['autosubmit']:
             return
 
         # look for any timed-out replicas
@@ -291,11 +291,18 @@ class Manager(Pyro.core.SynchronizedObjBase):
             log.info('%s' % r)
 
     # TODO: maybe also make a dict for this? probably not a big deal at the moment
-    def find_job_by_id(self, job_id):
+    def find_job_by_id(self, job_id, create=False):
         for j in self.jobs:
             if str(j.id) == str(job_id):
                 return j
-        return None
+        if create:
+            log.error('Job with id %s not found, creating new Job' % job_id)                
+            job = Job(self)
+            job.id = job_id
+            self.jobs.append(job)
+            return job
+        else:
+            return None
 
     #
     # Client calls to Manager
@@ -304,13 +311,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
     def connect(self, job_id, listener_uri):
         """ Clients make contact with the server by calling this """
         log.info('Job %s connected.' % str(job_id))        
-        job = self.find_job_by_id(job_id)
-        # TODO: replace with find_or_create_job??
-        if job is None:
-            log.error('Job sent unknown job id (%s), creating new job' % job_id)                
-            job = Job(self)
-            job.id = job_id
-            self.jobs.append(job)
+        job = self.find_job_by_id(job_id, create=True)
         # if this is the first time
         if not job.started:
             job.start()
@@ -327,13 +328,13 @@ class Manager(Pyro.core.SynchronizedObjBase):
         else:
             self.show_replicas()
             # Replica selection algorithm
-            r = RSARandom.select(self.replicas)
+            r = self.rsa_class.select(self.replicas)
             if r is not None:
                 log.info('Sending replica %s to client with job id %s' % (r.id, job.id))
                 job.replica_id = r.id
                 r.job_id = job.id
                 r.start()
-                return r.environment_variables()
+                return (r.command(), r.environment_variables())
             else:
                 log.warning('No replicas ready to run')
         return None
@@ -427,7 +428,7 @@ class Replica(Pyro.core.ObjBase):
     def start(self):
         log.info('Starting run for replica %s-%s (job %s)' % (str(self.id), str(self.sequence), self.job_id))
         self.start_time = datetime.datetime.now()
-        self.timeout_time = self.start_time + datetime.timedelta(seconds=float(self.manager.config['client']['timeout']))
+        self.timeout_time = self.start_time + datetime.timedelta(seconds=float(self.manager.config['job']['timeout']))
         self.status = self.RUNNING
     
     def stop(self, return_code=0):
@@ -440,12 +441,12 @@ class Replica(Pyro.core.ObjBase):
         return True
     
     def environment_variables(self):
-        self.options.update({'command': self.command(), 'id': str(self.id), 'sequence': str(self.sequence)})
+        self.options.update({'id': str(self.id), 'sequence': str(self.sequence)})
         return self.options
     
     def command(self):
         """ Get the actual code that runs the replica on the client node """
-        return ['/bin/sh', self.manager.config['client']['files']['run']]
+        return ['/bin/sh', self.manager.config['job']['script']]
 
 class Job(object):
     """
@@ -478,24 +479,24 @@ python ${pydr_client_path} -j $PBS_JOBID
         self.started = False
     
     def job_name(self):
-        return self.manager.config['client']['job_name_prefix']
+        return self.manager.config['job']['name']
         
     def start(self):
         self.start_time = datetime.datetime.now()
         # end time should be start time + walltime
-        self.predicted_end_time = self.start_time + datetime.timedelta(seconds=float(self.manager.config['client']['walltime']))
+        self.predicted_end_time = self.start_time + datetime.timedelta(seconds=float(self.manager.config['job']['walltime']))
         self.started = True
         
     def make_submit_script(self, options={}):
         """ Generate a submit script from the template """
         s = Template(self.DEFAULT_SUBMIT_SCRIPT_TEMPLATE)
-        defaults = {    'nodes': self.manager.config['client']['nodes'],
-                        'ppn': self.manager.config['client']['ppn'],
-                        'walltime': self.manager.config['client']['walltime'],
+        defaults = {    'nodes': self.manager.config['job']['nodes'],
+                        'ppn': self.manager.config['job']['ppn'],
+                        'walltime': self.manager.config['job']['walltime'],
                         #'pbs_extra': self.manager.config['client']['pbs_extra'],
                         'pbs_extra': ['os=centos53computeA'],
                         'job_name': self.job_name(),
-                        'mpiflags': self.manager.config['client']['mpiflags'],
+                        'mpiflags': self.manager.config['job']['mpiflags'],
                         'job_dir': self.manager.project_path,
                         'pydr_client_path': os.path.abspath(os.path.dirname(__file__)),
                         'pydr_server_path': os.path.abspath(os.path.dirname(__file__)),
@@ -538,7 +539,7 @@ python ${pydr_client_path} -j $PBS_JOBID
         
         # $PBS_JOBID
         # $PBS_O_WORKDIR
-        qsub_path = self.manager.config['system']['qsub_path']
+        qsub_path = self.manager.config['system']['qsub']
 
         (fd, f_abspath) = tempfile.mkstemp()
         os.write(fd, self.make_submit_script())
@@ -615,13 +616,19 @@ python ${pydr_client_path} -j $PBS_JOBID
 #
 
 class RSA(object):
-    def select(replicas):
+    """ Base Replica Selection Algorithm (RSA) """
+    def __init__(self):
+        pass
+    
+    def select(self, replicas):
         raise NotImplementedError('Select function not implemented in RSA subclass')
 
 class RSARandom(object):
-    def select(replicas):
+    """ Random replica selection algorithm """
+    def select(self, replicas):
+        import random
         replica_list = replicas.values()
-        replica_list.shuffle()
+        random.shuffle(replica_list)
         for r in replica_list:
             if r.status == Replica.READY:
                 log.info('RSARandom selected replica: %s' % str(r.id))
@@ -632,58 +639,63 @@ class RSARandom(object):
 # Config Specification
 #
 
-PYDR_CONFIG_SPEC = """#
-# PyDR Config File
-#
+PYDR_CONFIG_SPEC = """# PyDR Config File
 
 # set a title for this setup
 title = string(default='My DR')
 
-# System paths
+# Paths to system programs
 [system]
-    qsub_path = string(default='qsub')
-    checkjob_path = string(default='checkjob')
+    qsub = string(default='qsub')
+    checkjob = string(default='checkjob')
 
-# DR settings
-[server]
+# Manager (server) settings
+[manager]
     port = integer(min=1024, max=65534, default=7766)
+    # Name of the file containing the Pyro address of the manager
     hostfile = string(default='hostfile')
+    # Automatically submit (qsub) jobs as required when the manager is launched
     autosubmit = boolean(default=True)
-    # walltime in seconds
-    walltime = integer(min=1, max=999999, default=86400)
+    # approximate time interval in seconds for saving snapshots
     snapshottime = integer(min=1, max=999999, default=3600)
+    # file name of snapshot file
     snapshotfile = string(default='snapshot.pickle')
+    # replica selection algorithm
+    replica_selection_class = string(default='RSARandom')
 
-# client (Job) specific information
-[client]
-    port = integer(min=1024, max=65534, default=7767)
-    job_name_prefix = string(default='mysystem')
+# Job-specific configuration
+[job]
+    name = string(default='myjob')
+    # PBS submit script options
+    # processors per node
     ppn = integer(min=1, max=64, default=1)
+    # nodes per job
     nodes = integer(min=1, max=9999999, default=1)
-    mpiflags = string(default='-mca btl_sm_num_fifos 7 -mca mpi_paffinity_alone 1 -mca btl_openib_eager_limit 32767 -np $(wc -l $PBS_NODEFILE | gawk \'{print $1}\') -machinefile $PBS_NODEFILE')
     # walltime in seconds
     walltime = integer(min=1, max=999999, default=86400)
-    # timeout before server resubmits a client
+    # MPI flags set within the script
+    mpiflags = string(default='-mca btl_sm_num_fifos 7 -mca mpi_paffinity_alone 1 -mca btl_openib_eager_limit 32767 -np $(wc -l $PBS_NODEFILE | gawk \'{print $1}\') -machinefile $PBS_NODEFILE')
+    # timeout before server resubmits a job
     timeout = integer(min=0, max=999999, default=10000)
 
-    # files required by the client
-    [[files]]
-        # the run script is executed by the client for each replica
-        # it defaults to run.sh (located in the same directory as config.ini)
-        # replica variables are passed to this script via the client
-        run = string(default='run.sh')
+    # this script is executed by the client for each replica
+    # it defaults to run.sh (located in the same directory as config.ini)
+    # replica variables are passed to this script via the client
+    script = string(default='run.sh')
     
+    # files section will be used in the near future
+    # [[files]]
         # link files are not modified but are required by each replica/sequence, they are linked to save disk space
         # ex: link = initial.pdb, initial.psf
-        link = string_list(min=0, default=list())
+        # link = string_list(min=0, default=list())
         
         # copy files are files copied to each sequence. They may be modified by the run script at run-time
         # copy = md.conf, tclforces.tcl
-        copy = string_list(min=0, default=list())
+        # copy = string_list(min=0, default=list())
         
         # restart files are output files expected after a replica is done running
         # ex: restart = restart.vel, restart.coor, restart.xsc
-        restart = string_list(min=0, default=list())
+        # restart = string_list(min=0, default=list())
 
 # Replica settings
 [replicas]
