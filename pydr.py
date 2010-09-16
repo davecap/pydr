@@ -42,7 +42,7 @@ def server_listener(daemon, manager, start=False):
             if manager.shutdown:
                 break
             manager.maintain()
-            daemon.handleRequests(2.0)
+            daemon.handleRequests(10.0)
     finally:
         log.info('Server shutting down...')
         daemon.shutdown(True)
