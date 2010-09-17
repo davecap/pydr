@@ -268,22 +268,14 @@ class Manager(Pyro.core.SynchronizedObjBase):
                 r.stop(return_code=1)
                 # TODO: check on the job?
 
-        # get the number of replicas
-        num_replicas = len(self.replicas.keys())
-        jobs_running = 0
-        for j in self.jobs:
-            if not j.completed():
-                jobs_running += 1
-
-        # if there arent enough jobs for each replica, submit some
-        for i in range(num_replicas-jobs_running):
+        running_jobs = [ j for j in self.jobs if not j.completed() ]
+        # if there arent enough jobs for each replica, submit one
+        if len(running_jobs) < len(self.replicas.keys()):
             j = Job(self)
             if j.submit():
                 self.jobs.append(j)
             else:
                 log.warning('Job submission failed, not adding to job list')
-            # sleep to prevent overloading the server
-            time.sleep(1)
 
     def show_replicas(self):
         """ Print the status of all replicas """
