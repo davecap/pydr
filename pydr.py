@@ -533,21 +533,22 @@ python ${pydr_path} -j $PBS_JOBID
         qsub_path = self.manager.config['system']['qsub']
         (fd, f_abspath) = tempfile.mkstemp()
         os.write(fd, self.make_submit_script())
-        log.info('Submit script file: %s' % f_abspath)
-        process = subprocess.Popen([qsub_path, f_abspath], shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        log.debug('Submit script file: %s' % f_abspath)
+        process = subprocess.Popen([qsub_path, f_abspath], shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         returncode = process.returncode
         (out, err) = process.communicate()
-        log.info('Job submit stdout: %s' % out)
-        log.info('Job submit stderr: %s' % err)
-        
         try:
             self.id = out.split('.')[0]
-            int(job_id)
-        except:
+            int(self.id)
+        except Exception, ex:
             log.error('No job_id found in qsub output: %s' % out)
+            log.debug('Exception: %s' % str(ex))
+            log.debug('Job submit stdout: %s' % out)
+            log.debug('Job submit stderr: %s' % err)
             self.id = None
             return False
         else:
+            log.info('Job submitted with ID %s' % self.id)
             return True
 
     def get_job_properties(self):
@@ -555,7 +556,7 @@ python ${pydr_path} -j $PBS_JOBID
             log.error('Cannot get job properties with unknown job id')
             return None
         
-        process = subprocess.Popen('checkjob --format=XML %s' % (self.id,), shell=True, stdout=PIPE, stderr=PIPE)
+        process = subprocess.Popen('checkjob --format=XML %s' % (self.id,), shell=False, stdout=PIPE, stderr=PIPE)
         (out,err) = process.communicate()
         if not out:
             return None
@@ -590,7 +591,7 @@ python ${pydr_path} -j $PBS_JOBID
             return
         else:
             log.info('Cancelling job %s' % self.id)
-            process = subprocess.Popen('qdel %s' % (self.id,), shell=True, stdout=PIPE, stderr=PIPE)
+            process = subprocess.Popen('qdel %s' % (self.id,), shell=False, stdout=PIPE, stderr=PIPE)
             (out,err) = process.communicate()
 
 #

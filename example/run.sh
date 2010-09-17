@@ -10,9 +10,12 @@
 #   $k
 
 BASE_DIR=`pwd`
-SHM_DIR=/dev/shm/$USER
+SHM_DIR=/dev/shm/testpydr
 MPIRUN=/scinet/gpc/mpi/openmpi/1.4.1-intel-v11.0-ofed/bin/mpirun
 NAMD=$HOME/bin/namd2
+
+export PATH=/home/dacaplan/ENV/bin:/home/dacaplan/bin:/project/pomes/dacaplan/gromacs/gromacs-git/exec/bin:/scinet/gpc/compilers/gcc/bin/:/usr/lib64/qt-3.3/bin:/usr/kerberos/bin:/usr/local/bin:/bin:/usr/bin:/usr/lpp/mmfs/bin:/opt/torque/bin:/opt/torque/sbin:/usr/lpp/mmfs/bin:/opt/torque/bin:/opt/torque/sbin:/scinet/gpc/intel/Compiler/11.1/056/bin/intel64/:/scinet/gpc/mpi/openmpi/1.4.1-intel-v11.0-ofed/bin/:$PATH
+export LD_LIBRARY_PATH=/scinet/gpc/tools/Python/Python262/lib:/project/pomes/dacaplan/gromacs/gromacs-git/exec/lib:/scinet/gpc/lib/mpfr/lib:/scinet/gpc/compilers/gcc/lib64:/scinet/gpc/compilers/gcc/lib:/scinet/gpc/intel/Compiler/11.1/056/lib/intel64/:/scinet/gpc/intel/Compiler/11.1/056/mkl/lib/em64t/:/scinet/gpc/mpi/openmpi/1.4.1-intel-v11.0-ofed/lib:/scinet/gpc/mpi/openmpi/1.4.1-intel-v11.0-ofed/lib/openmpi:$LD_LIBRARY_PATH
 
 # test settings
 MPIRUN=
