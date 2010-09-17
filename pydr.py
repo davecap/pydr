@@ -230,7 +230,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
 
         # should we submit a new server?
         # if time left is less than half the walltime, submit a new server
-        if self.active and seconds_remaining < float(self.config['job']['walltime'])/2.0:
+        if self.config['manager']['mobile'] and self.active and seconds_remaining < float(self.config['job']['walltime'])/2.0:
             log.info('MAINTENANCE: Server attempting to transfer...')
             sorted_jobs = sorted(active_jobs, key=lambda j: j.start_time)
             if sorted_jobs == []:
@@ -650,6 +650,8 @@ title = string(default='My DR')
     snapshotfile = string(default='snapshot.pickle')
     # replica selection algorithm
     replica_selection_class = string(default='RSARandomReplica')
+    # mobile server enabled?
+    mobile = boolean(default=True)
 
 # Job-specific configuration
 [job]
