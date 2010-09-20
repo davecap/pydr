@@ -275,7 +275,8 @@ class Manager(Pyro.core.SynchronizedObjBase):
             if j.submit():
                 self.jobs.append(j)
             else:
-                log.warning('Job submission failed, not adding to job list')
+                log.error('Job submission failed, disabling autosubmit!')
+                self.config['manager']['autosubmit'] = False
 
     def show_replicas(self):
         """ Print the status of all replicas """
