@@ -5,8 +5,11 @@ title = My DR
 
 # Paths to system programs
 [system]
-    qsub = qsub
-    checkjob = checkjob
+    qsub = /opt/torque/bin/qsub
+    # path to ssh, used for job submission when submit_host is not empty (see below)
+    ssh = /usr/bin/ssh
+    # checkjob is unused now, but will be used in the future to check up on jobs
+    checkjob = /usr/local/bin/checkjob
 
 # Manager (server) settings
 [manager]
@@ -15,13 +18,15 @@ title = My DR
     hostfile = hostfile
     # Automatically submit (qsub) jobs as required when the manager is launched
     autosubmit = True
+    # submit host, ssh to this host when running qsub to submit jobs
+    submit_host = gpc01
     # approximate time interval in seconds for saving snapshots
     snapshottime = 3600
     # file name of snapshot file
     snapshotfile = snapshot.pickle
     # replica selection algorithm
-    replica_selection_class = RSARandom
-    # mobile server?
+    replica_selection_class = RSARandomReplica
+    # mobile server enabled?
     mobile = True
 
 # Job-specific configuration
@@ -38,11 +43,13 @@ title = My DR
     mpiflags = -mca btl_sm_num_fifos 7 -mca mpi_paffinity_alone 1 -mca btl_openib_eager_limit 32767 -np $(wc -l $PBS_NODEFILE | gawk '{print $1}') -machinefile $PBS_NODEFILE
     # timeout before server resubmits a job
     timeout = 10000
+    # job submit script
+    submit_script = submit.sh
     
     # this script is executed by the client for each replica
     # it defaults to run.sh (located in the same directory as config.ini)
     # replica variables are passed to this script via the client
-    script = run.sh
+    run_script = run.sh
 
 # Replica settings
 [replicas]

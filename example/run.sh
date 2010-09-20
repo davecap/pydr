@@ -10,17 +10,12 @@
 #   $k
 
 BASE_DIR=`pwd`
-SHM_DIR=/dev/shm/testpydr
+SHM_DIR=/dev/shm/dacaplan
 MPIRUN=/scinet/gpc/mpi/openmpi/1.4.1-intel-v11.0-ofed/bin/mpirun
-NAMD=$HOME/bin/namd2
+NAMD=~/bin/namd2
 
 export PATH=/home/dacaplan/ENV/bin:/home/dacaplan/bin:/project/pomes/dacaplan/gromacs/gromacs-git/exec/bin:/scinet/gpc/compilers/gcc/bin/:/usr/lib64/qt-3.3/bin:/usr/kerberos/bin:/usr/local/bin:/bin:/usr/bin:/usr/lpp/mmfs/bin:/opt/torque/bin:/opt/torque/sbin:/usr/lpp/mmfs/bin:/opt/torque/bin:/opt/torque/sbin:/scinet/gpc/intel/Compiler/11.1/056/bin/intel64/:/scinet/gpc/mpi/openmpi/1.4.1-intel-v11.0-ofed/bin/:$PATH
 export LD_LIBRARY_PATH=/scinet/gpc/tools/Python/Python262/lib:/project/pomes/dacaplan/gromacs/gromacs-git/exec/lib:/scinet/gpc/lib/mpfr/lib:/scinet/gpc/compilers/gcc/lib64:/scinet/gpc/compilers/gcc/lib:/scinet/gpc/intel/Compiler/11.1/056/lib/intel64/:/scinet/gpc/intel/Compiler/11.1/056/mkl/lib/em64t/:/scinet/gpc/mpi/openmpi/1.4.1-intel-v11.0-ofed/lib:/scinet/gpc/mpi/openmpi/1.4.1-intel-v11.0-ofed/lib/openmpi:$LD_LIBRARY_PATH
-
-# test settings
-MPIRUN=
-NAMD=/usr/local/bin/namd2
-SHM_DIR=/tmp/testrun
 
 # Create the replica/sequence dir in the current directory (the dir containing this file)
 OUTPUT_DIR=$BASE_DIR/$id/$sequence
@@ -36,10 +31,13 @@ if [ ! -e "$SHM_DIR" ]; then
     mkdir -p $SHM_DIR
 fi
 
+echo "Chdir to $SHM_DIR"
+cd $SHM_DIR
+
 # depending on the sequence number, use the correct input files
 if [ "$sequence" == "0" ]; then
     CONF=md.conf
-    cp $OUTPUT_DIR/../md.pdb $SHM_DIR/md.pdb
+    cp $OUTPUT_DIR/../md.pdb* $SHM_DIR/
 else
     # setup the restart files if sequence > 0
     CONF=md.restart.conf
@@ -57,8 +55,9 @@ cat $BASE_DIR/$CONF | sed -e "s/__CHI1_K__/$k/" | sed -e "s/__CHI1_COORD__/$coor
 
 function finish {
     printf "Saving results from directory $SHM_DIR to $OUTPUT_DIR on "; date
-    tar zcf $OUTPUT_DIR/restart.tar.gz $SHM_DIR/restart.*
-    tar zcf $OUTPUT_DIR/md.log.gz $SHM_DIR/md.log
+    tar zcf $OUTPUT_DIR/restart.tar.gz restart.*
+    gzip md.log
+    mv md.log.gz $OUTPUT_DIR/
     mv $SHM_DIR/md.dcd $OUTPUT_DIR/md.dcd
     mv $SHM_DIR/md.*.conf $OUTPUT_DIR/
     printf "Saving results complete on "; date
