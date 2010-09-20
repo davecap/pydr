@@ -4,6 +4,7 @@ import os
 import optparse
 import logging
 import subprocess
+import shlex
 import tempfile
 import time
 import datetime
@@ -530,11 +531,13 @@ python ${pydr_path} -j $PBS_JOBID
         
         log.info('Submitting job...')
         # note: client will send the job_id back to server to associate a replica with a job
-        qsub_path = self.manager.config['system']['qsub']
+        qsub_path = shlex.split(self.manager.config['system']['qsub'])
         (fd, f_abspath) = tempfile.mkstemp()
         os.write(fd, self.make_submit_script())
         log.debug('Submit script file: %s' % f_abspath)
-        process = subprocess.Popen([qsub_path, f_abspath], shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        qsub_path.append(f_abspath)
+        log.debug('Submitting: %s' % str(qsub_path))
+        process = subprocess.Popen(qsub_path, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         returncode = process.returncode
         (out, err) = process.communicate()
         try:
@@ -634,7 +637,7 @@ title = string(default='My DR')
 
 # Paths to system programs
 [system]
-    qsub = string(default='qsub')
+    qsub = string(default='/usr/bin/ssh gpc01 -c qsub')
     checkjob = string(default='checkjob')
 
 # Manager (server) settings
