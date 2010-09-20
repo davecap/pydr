@@ -4,7 +4,6 @@ import os
 import optparse
 import logging
 import subprocess
-import shlex
 import tempfile
 import time
 import datetime
@@ -531,13 +530,23 @@ python ${pydr_path} -j $PBS_JOBID
         
         log.info('Submitting job...')
         # note: client will send the job_id back to server to associate a replica with a job
-        qsub_path = shlex.split(self.manager.config['system']['qsub'])
-        (fd, f_abspath) = tempfile.mkstemp()
+        qsub_path = self.manager.config['system']['qsub']
+        ssh_path = self.manager.config['system']['ssh']
+        submit_host = self.manager.config['manager']['submit_host']
+        
+        tmpdir = os.path.join(self.manager.project_path, 'tmp')
+        if not os.path.exists(tmpdir):
+            os.mkdir(tmpdir)
+        
+        (fd, f_abspath) = tempfile.mkstemp(dir=tmpdir)
         os.write(fd, self.make_submit_script())
-        log.debug('Submit script file: %s' % f_abspath)
-        qsub_path.append(f_abspath)
-        log.debug('Submitting: %s' % str(qsub_path))
-        process = subprocess.Popen(qsub_path, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        log.debug('Submit script file: %s' % f_abspath)        
+        if submit_host is not None and submit_host != '':
+            submit_command = [ssh_path, submit_host, '"cd %s; %s %s"' % (self.manager.project_path, qsub_path, f_abspath)]
+        else:
+            submit_command = [qsub_path, f_abspath]
+        log.debug('Submitting: %s' % str(submit_command))
+        process = subprocess.Popen(submit_command, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         returncode = process.returncode
         (out, err) = process.communicate()
         try:
@@ -637,8 +646,11 @@ title = string(default='My DR')
 
 # Paths to system programs
 [system]
-    qsub = string(default='/usr/bin/ssh gpc01 -c qsub')
-    checkjob = string(default='checkjob')
+    qsub = string(default='/opt/torque/bin/qsub')
+    # path to ssh, used for job submission when submit_host is not empty (see below)
+    ssh = string(default='/usr/bin/ssh')
+    # checkjob is unused now, but will be used in the future to check up on jobs
+    checkjob = string(default='/usr/local/bin/checkjob')
 
 # Manager (server) settings
 [manager]
@@ -647,6 +659,8 @@ title = string(default='My DR')
     hostfile = string(default='hostfile')
     # Automatically submit (qsub) jobs as required when the manager is launched
     autosubmit = boolean(default=True)
+    # submit host, ssh to this host when running qsub to submit jobs
+    submit_host = string(default='gpc01')
     # approximate time interval in seconds for saving snapshots
     snapshottime = integer(min=1, max=999999, default=3600)
     # file name of snapshot file
