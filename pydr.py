@@ -53,7 +53,8 @@ def main():
     parser.add_option("-c", "--config", dest="config_file", default="config.ini", help="Config file [default: %default]")
     parser.add_option("-j", "--job-id", dest="job_id", default=str(int(time.time())), help="Job ID [default: %default]")
     parser.add_option("-s", "--start", dest="start_server", action="store_true", default=False, help="Start the server [default: %default]")    
-    
+    parser.add_option("-n", "--pbs-nodefile", dest="pbs_nodefile", default=None, help="Contents of $PBS_NODEFILE")
+        
     (options, args) = parser.parse_args()
     
     config = setup_config(options.config_file, create=True)
@@ -107,7 +108,7 @@ def main():
         
                 log.debug('Asking manager for a replica...')
                 # TODO: handle exceptions
-                replica = server.get_replica(options.job_id)
+                replica = server.get_replica(options.job_id, options.pbs_nodefile)
             
                 # if the server returns a replica
                 if replica:
@@ -307,7 +308,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
             job.start()
             job.uri = listener_uri
     
-    def get_replica(self, job_id):
+    def get_replica(self, job_id, pbs_nodefile=None):
         """ Get the next replica for a job to run by calling this """
         log.info('Job %s wants a replica' % str(job_id))        
         job = self.find_job_by_id(job_id)
@@ -324,7 +325,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
                 job.replica_id = r.id
                 r.job_id = job.id
                 r.start()
-                return (r.command(), r.environment_variables())
+                return (r.command(), r.environment_variables(PBS_JOBID=job.id, PBS_NODEFILE=pbs_nodefile))
             else:
                 log.warning('No replicas ready to run')
         return None
@@ -423,15 +424,17 @@ class Replica(Pyro.core.ObjBase):
         self.sequence += 1
     
     def stop(self, return_code=0):
-        # TODO: handle return code
         log.info('Ending run for replica %s-%s (job %s)' % (str(self.id), str(self.sequence), self.job_id))
+        # TODO: if the run time is less than 5 minutes, raise an error?
         self.start_time = None
         self.timeout_time = None
         self.status = self.READY
         return True
     
-    def environment_variables(self):
+    def environment_variables(self, **kwargs):
         current_properties = self.properties
+        for key, value in kwargs.iteritems():
+            current_properties.update({key: value})
         current_properties.update({'id': str(self.id), 'sequence': str(self.sequence)})
         return current_properties
     
