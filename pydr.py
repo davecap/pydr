@@ -267,7 +267,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
 
         running_jobs = [ j for j in self.jobs if not j.completed() ]
         # if there arent enough jobs for each replica, submit one
-        if len(running_jobs) < len(self.replicas.keys()):
+        if (1+len(running_jobs)) < len(self.replicas.keys()):
             j = Job(self)
             if j.submit():
                 self.jobs.append(j)
