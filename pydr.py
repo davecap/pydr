@@ -555,6 +555,7 @@ python ${pydr_path} -j $PBS_JOBID
         (out, err) = process.communicate()
         
         try:
+            out = out.strip()
             # qsub should return <integer>.<string>
             split_output = out.split('.')
             # this will raise an exception if it isnt an integer
