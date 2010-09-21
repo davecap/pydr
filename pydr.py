@@ -543,7 +543,7 @@ python ${pydr_path} -j $PBS_JOBID
         os.write(fd, self.make_submit_script())
         # log.debug('Submit script file: %s' % f_abspath)        
         if submit_host is not None and submit_host != '':
-            submit_command = [ssh_path, submit_host, '"%s %s"' % (self.manager.project_path, qsub_path, f_abspath)]
+            submit_command = [ssh_path, submit_host, '"%s %s"' % (qsub_path, f_abspath)]
         else:
             submit_command = [qsub_path, f_abspath]
         log.debug('Submitting: %s' % str(submit_command))
