@@ -226,9 +226,6 @@ class Manager(Pyro.core.SynchronizedObjBase):
             self.snapshot.save(self)
 
         active_jobs = [ j for j in self.jobs if not j.completed() and j.id != self.job_id ]
-        # log.debug('MAINTENANCE: %d available job(s).' % len(active_jobs))
-
-        # should we submit a new server?
         # if time left is less than half the walltime, submit a new server
         if self.config['manager']['mobile'] and self.active and seconds_remaining < float(self.config['job']['walltime'])/2.0:
             log.info('MAINTENANCE: Server attempting to transfer...')
@@ -535,24 +532,35 @@ python ${pydr_path} -j $PBS_JOBID
         ssh_path = self.manager.config['system']['ssh']
         submit_host = self.manager.config['manager']['submit_host']
         
+        # Make sure the temp dir exists.
+        # We make a tempdir in the project dir because we need to ssh to a head node to submit, and the script should be available there too
         tmpdir = os.path.join(self.manager.project_path, 'tmp')
         if not os.path.exists(tmpdir):
             os.mkdir(tmpdir)
         
+        # create a temporary file in the <project_dir>/tmp
         (fd, f_abspath) = tempfile.mkstemp(dir=tmpdir)
         os.write(fd, self.make_submit_script())
-        # log.debug('Submit script file: %s' % f_abspath)        
+        f_basename = os.path.basename(f_abspath)
+        # if the user specified a submit_host then prepare the command
         if submit_host is not None and submit_host != '':
-            submit_command = [ssh_path, submit_host, '"%s %s"' % (qsub_path, f_abspath)]
+            # ssh gpc01 "cd $PBS_O_WORKDIR; qsub submit.sh"
+            submit_command = ' '.join([ssh_path, submit_host, '"cd %s; %s %s"' % (tmpdir, qsub_path, f_basename)])
         else:
-            submit_command = [qsub_path, f_abspath]
-        log.debug('Submitting: %s' % str(submit_command))
-        process = subprocess.Popen(submit_command, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            submit_command = ' '.join([qsub_path, f_abspath])
+        
+        log.debug('Submitting: "%s"' % submit_command)
+        process = subprocess.Popen(submit_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         returncode = process.returncode
         (out, err) = process.communicate()
+        
         try:
-            self.id = out.split('.')[0]
-            int(self.id)
+            # qsub should return <integer>.<string>
+            split_output = out.split('.')
+            # this will raise an exception if it isnt an integer
+            int(split_output[0])
+            # use the whole string as the job id
+            self.id = split_output
         except Exception, ex:
             log.error('No job_id found in qsub output: %s' % out)
             log.debug('Exception: %s' % str(ex))
