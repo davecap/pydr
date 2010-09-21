@@ -449,8 +449,6 @@ class Job(object):
 #PBS -l nodes=${nodes}:ib:ppn=${ppn},walltime=${walltime}${pbs_extra}
 #PBS -N ${job_name}
 
-MPIFLAGS="${mpiflags}"
-
 # $PBS_O_WORKDIR
 # $PBS_JOBID
 
@@ -494,7 +492,6 @@ python ${pydr_path} -j $PBS_JOBID
                         #'pbs_extra': self.manager.config['client']['pbs_extra'],
                         'pbs_extra': ['os=centos53computeA'],
                         'job_name': self.job_name(),
-                        'mpiflags': self.manager.config['job']['mpiflags'],
                         'job_dir': self.manager.project_path,
                         'pydr_path': os.path.abspath(os.path.dirname(__file__)),
                     }
@@ -690,8 +687,6 @@ title = string(default='My DR')
     nodes = integer(min=1, max=9999999, default=1)
     # walltime in seconds
     walltime = integer(min=1, max=999999, default=86400)
-    # MPI flags set within the script
-    mpiflags = string(default='-mca btl_sm_num_fifos 7 -mca mpi_paffinity_alone 1 -mca btl_openib_eager_limit 32767 -np $(wc -l $PBS_NODEFILE | gawk \'{print $1}\') -machinefile $PBS_NODEFILE')
     # timeout before server resubmits a job
     timeout = integer(min=0, max=999999, default=10000)
     # job submit script
