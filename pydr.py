@@ -267,7 +267,8 @@ class Manager(Pyro.core.SynchronizedObjBase):
 
         running_jobs = [ j for j in self.jobs if not j.completed() ]
         # if there arent enough jobs for each replica, submit one
-        if (1+len(running_jobs)) < len(self.replicas.keys()):
+        runnable_replicas = [ r for r in self.replicas.keys() if r.runnable() ]
+        if (1+len(running_jobs)) < len(runnable_replicas):
             j = Job(self)
             if j.submit():
                 self.jobs.append(j)
@@ -450,6 +451,9 @@ class Replica(Pyro.core.ObjBase):
     
     def __repr__(self):
         return '<Replica %s:%s>' % (str(self.id), self.status)
+
+    def runnable(self):
+        return self.status != Replica.ERROR and self.status != Replica.FINISHED
     
     def start(self):
         log.info('Starting run for replica %s-%s (job %s)' % (str(self.id), str(self.sequence), self.job_id))
