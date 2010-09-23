@@ -8,7 +8,7 @@ from validate import Validator
 import Pyro.core
 from Pyro.errors import ProtocolError
 
-import pydr
+from pydr import setup_config, Replica, Job, Manager
 
 def main():    
     usage = """
@@ -31,7 +31,7 @@ def main():
     
     (options, args) = parser.parse_args()
     
-    config = pydr.setup_config(options.config_file, create=False)
+    config = setup_config(options.config_file, create=False)
     
     project_path = os.path.abspath(os.path.dirname(config.filename))
     hostfile = os.path.join(project_path, config['manager']['hostfile'])
