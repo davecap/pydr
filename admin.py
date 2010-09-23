@@ -18,17 +18,17 @@ def main():
     parser = optparse.OptionParser(usage)
     parser.add_option("-c", "--config", dest="config_file", default="config.ini", help="Config file [default: %default]")
     # show replicas
-    parser.add_option("-l", dest="show_all_replicas", default=False, help="Show all replicas [default: %default]")
+    parser.add_option("-l", dest="show_all_replicas", default=False, action="store_true", help="Show all replicas [default: %default]")
     parser.add_option("-s", dest="show_single_replica", default=None, help="Show a single replica [default: %default]")
     # show jobs
-    parser.add_option("-j", dest="show_all_jobs", default=False, help="Show all jobs [default: %default]")
+    parser.add_option("-j", dest="show_all_jobs", default=False, action="store_true", help="Show all jobs [default: %default]")
     # set replica ready
     parser.add_option("-r", dest="set_replica_ready", default=None, help="Set a replica to READY [default: %default]")
     # set replica error
     parser.add_option("-e", dest="set_replica_error", default=None, help="Set a replica to ERROR [default: %default]")
     # set replica finished
     parser.add_option("-f", dest="set_replica_finished", default=None, help="Set a replica to FINISHED [default: %default]")
-    
+        
     (options, args) = parser.parse_args()
     
     config = setup_config(options.config_file, create=False)
