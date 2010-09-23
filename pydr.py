@@ -264,7 +264,6 @@ class Manager(Pyro.core.SynchronizedObjBase):
             if r.status == Replica.RUNNING and now >= r.timeout_time:
                 log.error('Replica %s timed-out, ending the run' % r_id)
                 r.stop(return_code=1)
-                # TODO: check on the job?
 
         running_jobs = [ j for j in self.jobs if not j.completed() ]
         # if there arent enough jobs for each replica, submit one
@@ -294,6 +293,39 @@ class Manager(Pyro.core.SynchronizedObjBase):
             return job
         else:
             return None
+    
+    #
+    # Admin calls to Manager
+    #
+    
+    def get_replicas(self, replica_id=None):
+        if replica_id is not None:
+            try:
+                return self.replicas[replica_id]
+            except:
+                return None
+        else:
+            return self.replicas
+        
+    def get_jobs(self, job_id=None):
+        if job_id is not None:
+            return self.find_job_by_id(job_id, create=False)
+        else:
+            self.jobs
+            
+    def set_replica_status(self, replica_id, status):
+        try:
+            r = self.replicas[replica_id]
+            if r.status == Replica.RUNNING:
+                log.warning('Could not change replica %s status... replica is running' % str(replica_id))
+                return False
+            else:
+                log.info('Changing replica %s status from %s to %s' % (str(replica_id), r.status, status))
+                r.status = status
+                return True
+        except:
+            log.error('Could not change replica %s status' % str(replica_id))
+            return False
 
     #
     # Client calls to Manager
@@ -425,10 +457,16 @@ class Replica(Pyro.core.ObjBase):
     
     def stop(self, return_code=0):
         log.info('Ending run for replica %s-%s (job %s)' % (str(self.id), str(self.sequence), self.job_id))
-        # TODO: if the run time is less than 5 minutes, raise an error?
+        if return_code != 0:
+            log.error('Replica %s-%s returned non-zero code (%s)' % (str(self.id), str(self.sequence), return_code))
+            self.status = Replica.ERROR
+        elif (datetime.datetime.now()-self.start_time) < datetime.timedelta(minutes=10):
+            log.warning('Replica %s-%s ran for less than 10 minutes' % (str(self.id), str(self.sequence)))
+            self.status = Replica.ERROR
+        else:
+            self.status = self.READY
         self.start_time = None
         self.timeout_time = None
-        self.status = self.READY
         return True
     
     def environment_variables(self, **kwargs):
@@ -555,13 +593,12 @@ python ${pydr_path} -j $PBS_JOBID
         (out, err) = process.communicate()
         
         try:
-            out = out.strip()
+            # use the whole string as the job id
+            self.id = out.strip()
             # qsub should return <integer>.<string>
-            split_output = out.split('.')
+            split_output = self.id.split('.')
             # this will raise an exception if it isnt an integer
             int(split_output[0])
-            # use the whole string as the job id
-            self.id = split_output
         except Exception, ex:
             log.error('No job_id found in qsub output: %s' % out)
             log.debug('Exception: %s' % str(ex))
