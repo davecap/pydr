@@ -349,7 +349,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
         elif job is None:
             log.error('Client with invalid job_id (%s) pinged the server!' % (job_id))
         else:
-            self.show_replicas()
+            # self.show_replicas()
             # Replica selection algorithm
             r = self.rsa_class.select(self.replicas)
             if r is not None:
@@ -487,7 +487,7 @@ class Job(object):
         
     DEFAULT_SUBMIT_SCRIPT_TEMPLATE = """
 #!/bin/bash
-#PBS -l nodes=${nodes}:ib:ppn=${ppn},walltime=${walltime}${pbs_extra}
+#PBS -l nodes=${nodes}:ppn=${ppn},walltime=${walltime}${pbs_extra}
 #PBS -N ${job_name}
 
 # $PBS_O_WORKDIR
