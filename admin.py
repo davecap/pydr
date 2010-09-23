@@ -48,7 +48,7 @@ def main():
     server = Pyro.core.getProxyForURI(server_uri)
     server._setTimeout(1)
     
-    replicas = server.get_replicas()
+    replicas = server.get_all_replicas()
     
     if options.show_single_replica is not None:
          replica_id = options.show_single_replica
@@ -59,7 +59,7 @@ def main():
             print r
     
     if options.show_all_jobs:
-        jobs = server.get_jobs()
+        jobs = server.get_all_jobs()
         for j in jobs:
             if not j.completed():
                 if j.replica_id is not None:

@@ -298,20 +298,23 @@ class Manager(Pyro.core.SynchronizedObjBase):
     # Admin calls to Manager
     #
     
-    def get_replicas(self, replica_id=None):
-        if replica_id is not None:
-            try:
-                return self.replicas[replica_id]
-            except:
-                return None
-        else:
-            return self.replicas
+    # TODO: rename these functions!
+    def get_all_replicas(self):
+        pickle_replicas = {}
+        for r_id, r in self.replicas.iteritems():
+            r_copy = copy.copy(r)
+            r_copy.manager = None
+            r_copy.daemon = None
+            pickle_replicas[r_id] = r_copy
+        return pickle_replicas
         
-    def get_jobs(self, job_id=None):
-        if job_id is not None:
-            return self.find_job_by_id(job_id, create=False)
-        else:
-            self.jobs
+    def get_all_jobs(self):
+        pickle_jobs = []
+        for j in self.jobs:
+            j_copy = copy.copy(j)
+            j_copy.manager = None
+            pickle_jobs.append(j_copy)
+        return pickle_jobs
             
     def set_replica_status(self, replica_id, status):
         try:
