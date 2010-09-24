@@ -456,11 +456,11 @@ class Replica(Pyro.core.ObjBase):
         return self.status != Replica.ERROR and self.status != Replica.FINISHED
     
     def start(self):
-        log.info('Starting run for replica %s-%s (job %s)' % (str(self.id), str(self.sequence), self.job_id))
         self.start_time = datetime.datetime.now()
         self.timeout_time = self.start_time + datetime.timedelta(seconds=float(self.manager.config['job']['timeout']))
         self.status = self.RUNNING
         self.sequence += 1
+        log.info('Starting run for replica %s-%s (job %s)' % (str(self.id), str(self.sequence), self.job_id))
     
     def stop(self, return_code=0):
         log.info('Ending run for replica %s-%s (job %s)' % (str(self.id), str(self.sequence), self.job_id))
