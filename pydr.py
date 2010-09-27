@@ -226,14 +226,14 @@ class Manager(Pyro.core.SynchronizedObjBase):
             self.last_snapshot_time = seconds_since_start
             self.snapshot.save(self)
 
-        active_jobs = [ j for j in self.jobs if not j.completed() and j.id != self.job_id ]
         # if time left is less than half the walltime, submit a new server
         if self.config['manager']['mobile'] and self.active and seconds_remaining < float(self.config['job']['walltime'])/2.0:
             log.info('MAINTENANCE: Server attempting to transfer...')
-            sorted_jobs = sorted(active_jobs, key=lambda j: j.start_time)
-            if sorted_jobs == []:
-                log.error('MAINTENANCE: No youngest job found for server transfer!')
+            active_jobs = [ j for j in self.jobs if j.started and not j.completed() and j.id != self.job_id ]
+            if len(active_jobs) == 0:
+                log.error('MAINTENANCE: No jobs are active!')
             else:
+                sorted_jobs = sorted(active_jobs, key=lambda j: j.start_time)
                 self.snapshot.save(self)
                 # try clients from the youngest to oldest
                 while len(sorted_jobs) > 0:
