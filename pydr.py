@@ -190,8 +190,8 @@ class Manager(Pyro.core.SynchronizedObjBase):
                 if r_id not in self.replicas.keys():
                     raise Exception('Replica %s found in config but not in snapshot!' % str(r_id))
                 for c in r_config.keys():
-                    if c not in self.replicas[r_id].options.keys():
-                        raise Exception('Mismatch between snapshot and config replica options: %s vs %s' % (self.replicas[r_id].options.keys(), r_config.keys()))
+                    if c not in self.replicas[r_id].properties.keys():
+                        raise Exception('Mismatch between snapshot and config replica options: %s vs %s' % (self.replicas[r_id].properties.keys(), r_config.keys()))
             log.info('Snapshot loaded successfuly')
         else:
             # initialize a new snapshot
@@ -267,7 +267,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
 
         running_jobs = [ j for j in self.jobs if not j.completed() ]
         # if there arent enough jobs for each replica, submit one
-        runnable_replicas = [ r for r in self.replicas.keys() if r.runnable() ]
+        runnable_replicas = [ r for r in self.replicas.values() if r.runnable() ]
         if (1+len(running_jobs)) < len(runnable_replicas):
             j = Job(self)
             if j.submit():
