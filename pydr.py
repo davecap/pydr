@@ -321,8 +321,9 @@ class Manager(Pyro.core.SynchronizedObjBase):
             if r.status == Replica.RUNNING:
                 r.stop()
         for j in self.jobs:
+            now = datetime.datetime.now()
             if not j.completed():
-                j.predicted_end_time = 0
+                j.predicted_end_time = now
     
     # TODO: rename these functions!
     def get_all_replicas(self):
