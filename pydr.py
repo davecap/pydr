@@ -141,8 +141,6 @@ class Manager(Pyro.core.SynchronizedObjBase):
     def __init__(self, config, daemon, job_id):
         Pyro.core.SynchronizedObjBase.__init__(self)
         self.job_id = job_id
-        # the job_id of the previous manager/server
-        self.prev_job_id = None
         self.config = config
         # manager URI for the hostfile
         self.uri = "PYROLOC://%s:%s/manager" % (daemon.hostname, daemon.port)
@@ -167,25 +165,18 @@ class Manager(Pyro.core.SynchronizedObjBase):
         # load the replica selection algorithm class
         log.info('Loading replica selection algorithm class %s...' % self.config['manager']['replica_selection_class'])
         self.rsa_class = globals()[self.config['manager']['replica_selection_class']]()
+        
+        # mobile server
+        # half-way through the walltime of the server's job, it will submit a new job and wait for it to connect
+        self.next_job_id = None
     
     def stop(self):
         # TODO: there must be a better way. Use signals to kill the manager listener thread?
         self.shutdown = True
 
-    def start(self, prev_job_id=None):
+    def start(self):
         """ Start the server """
-        
-        # time since init (how long since the job was started)
-        timedelta = datetime.datetime.now()-self.init_time
-        # calculate total number of seconds
-        seconds_since_start = timedelta.seconds + timedelta.days*24*60*60
-        
-        if seconds_since_start > float(self.config['job']['walltime'])/1.5:
-            log.warning('Server tried to transfer but client job already approaching walltime')
-            return False
-
         log.info('Starting the server!')
-        self.prev_job_id = prev_job_id
         self.active = True
         f = open(self.hostfile, 'w')
         log.debug('Writing hostfile...')
@@ -239,33 +230,45 @@ class Manager(Pyro.core.SynchronizedObjBase):
             self.last_snapshot_time = seconds_since_start
             self.snapshot.save(self)
 
-        # if time left is less than half the walltime, submit a new server
-        if self.config['manager']['mobile'] and self.active and seconds_since_start >= float(self.config['job']['walltime'])/1.25:
-            log.info('MAINTENANCE: Server attempting to transfer...')
-            active_jobs = [ j for j in self.jobs if j.started and not j.completed() and j.id != self.job_id and j.id != self.prev_job_id ]
-            if len(active_jobs) == 0:
-                log.error('MAINTENANCE: No jobs are active!')
+        # if time left is less than half the walltime, submit a new server if we haven't already
+        if self.config['manager']['mobile'] and self.next_job_id is None and self.active and seconds_since_start > float(self.config['job']['walltime'])/2:
+            # submit a new job:
+            log.info('Server submitting a new job for manager transfer...')
+            j = Job(self)
+            if j.submit():
+                self.jobs.append(j)
+                self.next_job_id = j.id
             else:
-                sorted_jobs = sorted(active_jobs, key=lambda j: j.start_time)
-                self.snapshot.save(self)
-                # try clients from the youngest to oldest
-                while len(sorted_jobs) > 0:
-                    log.debug('MAINTENANCE: Trying to start server on client %s' % sorted_jobs[-1].id)
-                    server_listener = Pyro.core.getProxyForURI(sorted_jobs[-1].uri)
-                    server_listener._setTimeout(5)
-                    try:
-                        started = server_listener.start(prev_job_id=self.job_id)
-                        if started:
-                            log.debug('MAINTENANCE: Started server on client %s' % sorted_jobs[-1].id)
-                            self.active = False
-                            return
-                    except Exception, ex:
-                        log.error('MAINTENANCE: Could not connect to youngest client (%s)' % str(ex))
-                    # pop the last element and try again
-                    server_listener._release()
-                    sorted_jobs.pop()
+                log.error('Job submission failed for manager transfer! Will not try again')
+                log.error('You will have to restart the server manually when the job ends')
+                self.next_job_id = -1
+           
+        # TODO: emergency job transfer if the next manager doesn't start in time
+        # active_jobs = [ j for j in self.jobs if j.started and not j.completed() and j.id != self.job_id ]
+        # if len(active_jobs) == 0:
+        #     log.error('MAINTENANCE: No jobs are active!')
+        # else:
+        #     sorted_jobs = sorted(active_jobs, key=lambda j: j.start_time)
+        #     self.snapshot.save(self)
+        #     # try clients from the youngest to oldest
+        #     while len(sorted_jobs) > 0:
+        #         log.debug('MAINTENANCE: Trying to start server on client %s' % sorted_jobs[-1].id)
+        #         server_listener = Pyro.core.getProxyForURI(sorted_jobs[-1].uri)
+        #         server_listener._setTimeout(5)
+        #         try:
+        #             started = server_listener.start(prev_job_id=self.job_id)
+        #             if started:
+        #                 log.debug('MAINTENANCE: Started server on client %s' % sorted_jobs[-1].id)
+        #                 self.active = False
+        #                 return
+        #         except Exception, ex:
+        #             log.error('MAINTENANCE: Could not connect to youngest client (%s)' % str(ex))
+        #         # pop the last element and try again
+        #         server_listener._release()
+        #         sorted_jobs.pop()
+        
         return True
-
+        
     def autosubmit(self):
         """ Submit replicas if necessary """
         if not self.config['manager']['autosubmit']:
@@ -356,6 +359,18 @@ class Manager(Pyro.core.SynchronizedObjBase):
         if not job.started:
             job.start()
             job.uri = listener_uri
+            # if this is the next manager job, start the manager
+            if self.next_job_id == str(job_id):
+                log.info('Next manager job just connected, starting manager')
+                server_listener = Pyro.core.getProxyForURI(job.uri)
+                server_listener._setTimeout(3)
+                try:
+                    started = server_listener.start()
+                    if started:
+                        log.debug('Started server on client %s' % self.next_job_id)
+                        self.active = False
+                except Exception, ex:
+                    log.error('Could not connect to client (%s)' % str(ex))
     
     def get_replica(self, job_id, pbs_nodefile=None):
         """ Get the next replica for a job to run by calling this """
