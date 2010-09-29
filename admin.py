@@ -28,6 +28,8 @@ def main():
     parser.add_option("-e", dest="set_replica_error", default=None, help="Set a replica to ERROR [default: %default]")
     # set replica finished
     parser.add_option("-f", dest="set_replica_finished", default=None, help="Set a replica to FINISHED [default: %default]")
+    # force reset
+    parser.add_option("--force-reset", dest="force_reset", default=False, action="store_true", help="Force reset of all replicas and jobs in case of a crash [default: %default]")
         
     (options, args) = parser.parse_args()
     
@@ -49,6 +51,11 @@ def main():
     server._setTimeout(1)
     
     replicas = server.get_all_replicas()
+    
+    if options.force_reset:
+        print "Resetting all replicas and jobs!!"
+        server.force_reset()
+        return
     
     if options.show_single_replica is not None:
          replica_id = options.show_single_replica

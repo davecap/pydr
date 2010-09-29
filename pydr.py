@@ -315,6 +315,15 @@ class Manager(Pyro.core.SynchronizedObjBase):
     # Admin calls to Manager
     #
     
+    def force_reset(self):
+        log.info("Setting all RUNNING replicas to READY...")
+        for r in self.replicas.values():
+            if r.status == Replica.RUNNING:
+                r.stop()
+        for j in self.jobs:
+            if not j.completed():
+                j.predicted_end_time = 0
+    
     # TODO: rename these functions!
     def get_all_replicas(self):
         pickle_replicas = {}
