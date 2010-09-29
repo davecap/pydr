@@ -1,5 +1,5 @@
 #!/bin/bash
-#PBS -l nodes=${nodes}:ib:ppn=${ppn},walltime=${walltime}${pbs_extra}
+#PBS -l nodes=${nodes}:ppn=${ppn},walltime=${walltime}${pbs_extra}
 #PBS -N ${job_name}
 
 # $PBS_O_WORKDIR
