@@ -141,6 +141,8 @@ class Manager(Pyro.core.SynchronizedObjBase):
     def __init__(self, config, daemon, job_id):
         Pyro.core.SynchronizedObjBase.__init__(self)
         self.job_id = job_id
+        # the job_id of the previous manager/server
+        self.prev_job_id = None
         self.config = config
         # manager URI for the hostfile
         self.uri = "PYROLOC://%s:%s/manager" % (daemon.hostname, daemon.port)
@@ -169,10 +171,21 @@ class Manager(Pyro.core.SynchronizedObjBase):
     def stop(self):
         # TODO: there must be a better way. Use signals to kill the manager listener thread?
         self.shutdown = True
-    
-    def start(self):
+
+    def start(self, prev_job_id=None):
         """ Start the server """
+        
+        # time since init (how long since the job was started)
+        timedelta = datetime.datetime.now()-self.init_time
+        # calculate total number of seconds
+        seconds_since_start = timedelta.seconds + timedelta.days*24*60*60
+        
+        if seconds_since_start > float(self.config['job']['walltime'])/1.5:
+            log.warning('Server tried to transfer but client job already approaching walltime')
+            return False
+
         log.info('Starting the server!')
+        self.prev_job_id = prev_job_id
         self.active = True
         f = open(self.hostfile, 'w')
         log.debug('Writing hostfile...')
@@ -227,9 +240,9 @@ class Manager(Pyro.core.SynchronizedObjBase):
             self.snapshot.save(self)
 
         # if time left is less than half the walltime, submit a new server
-        if self.config['manager']['mobile'] and self.active and seconds_remaining < float(self.config['job']['walltime'])/2.0:
+        if self.config['manager']['mobile'] and self.active and seconds_since_start >= float(self.config['job']['walltime'])/1.25:
             log.info('MAINTENANCE: Server attempting to transfer...')
-            active_jobs = [ j for j in self.jobs if j.started and not j.completed() and j.id != self.job_id ]
+            active_jobs = [ j for j in self.jobs if j.started and not j.completed() and j.id != self.job_id and j.id != self.prev_job_id ]
             if len(active_jobs) == 0:
                 log.error('MAINTENANCE: No jobs are active!')
             else:
@@ -241,7 +254,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
                     server_listener = Pyro.core.getProxyForURI(sorted_jobs[-1].uri)
                     server_listener._setTimeout(5)
                     try:
-                        started = server_listener.start()
+                        started = server_listener.start(prev_job_id=self.job_id)
                         if started:
                             log.debug('MAINTENANCE: Started server on client %s' % sorted_jobs[-1].id)
                             self.active = False
