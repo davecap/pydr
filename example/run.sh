@@ -20,7 +20,8 @@ NAMD=~/bin/namd2
 
 PDB=$BASE_DIR/$pdb
 
-MPIFLAGS="-mca btl_sm_num_fifos 7 -mca mpi_paffinity_alone 1 -mca btl_openib_eager_limit 32767 -np $(wc -l $PBS_NODEFILE | gawk '{print $1}') -machinefile $PBS_NODEFILE"
+#MPIFLAGS="-mca btl_sm_num_fifos 7 -mca mpi_paffinity_alone 1 -mca btl_openib_eager_limit 32767 -np $(wc -l $PBS_NODEFILE | gawk '{print $1}') -machinefile $PBS_NODEFILE"
+MPIFLAGS="-mca btl_sm_num_fifos 7 -mca mpi_paffinity_alone 1 -np $(wc -l $PBS_NODEFILE | gawk '{print $1}')"
 export PATH=/home/dacaplan/ENV/bin:/home/dacaplan/bin:/project/pomes/dacaplan/gromacs/gromacs-git/exec/bin:/scinet/gpc/compilers/gcc/bin/:/usr/lib64/qt-3.3/bin:/usr/kerberos/bin:/usr/local/bin:/bin:/usr/bin:/usr/lpp/mmfs/bin:/opt/torque/bin:/opt/torque/sbin:/usr/lpp/mmfs/bin:/opt/torque/bin:/opt/torque/sbin:/scinet/gpc/intel/Compiler/11.1/056/bin/intel64/:/scinet/gpc/mpi/openmpi/1.4.1-intel-v11.0-ofed/bin/:$PATH
 export LD_LIBRARY_PATH=/scinet/gpc/tools/Python/Python262/lib:/project/pomes/dacaplan/gromacs/gromacs-git/exec/lib:/scinet/gpc/lib/mpfr/lib:/scinet/gpc/compilers/gcc/lib64:/scinet/gpc/compilers/gcc/lib:/scinet/gpc/intel/Compiler/11.1/056/lib/intel64/:/scinet/gpc/intel/Compiler/11.1/056/mkl/lib/em64t/:/scinet/gpc/mpi/openmpi/1.4.1-intel-v11.0-ofed/lib:/scinet/gpc/mpi/openmpi/1.4.1-intel-v11.0-ofed/lib/openmpi:$LD_LIBRARY_PATH
 export PYTHONPATH=/home/dacaplan/lib/python:/home/dacaplan/lib/python2.6/site-packages:/home/dacaplan/lib/python2.4/site-packages:/scinet/gpc/tools/Python/Python262/lib/python2.6/:/scinet/gpc/tools/Python/Python262/lib/python2.6/lib-dynload/:/scinet/gpc/tools/Python/Python262/lib/python2.6/site-packages/:/scinet/gpc/tools/Python/Python262/lib/python2.6/site-packages/Scientific/linux2/:/scinet/gpc/tools/Python/Python262/lib/python2.6/lib-tk/

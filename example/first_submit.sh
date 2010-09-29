@@ -1,6 +1,6 @@
 #!/bin/bash
-#PBS -l nodes=4:ib:ppn=8,walltime=46:00:00,os=centos53computeA
-#PBS -N 1m56wt0
+#PBS -l nodes=1:ppn=8,walltime=20:00:00
+#PBS -N 1m56WT0
 
 cd $PBS_O_WORKDIR
 
