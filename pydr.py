@@ -502,7 +502,9 @@ class Replica(Pyro.core.ObjBase):
     
     def stop(self, return_code=0):
         log.info('Ending run for replica %s-%s (job %s)' % (str(self.id), str(self.sequence), self.job_id))
-        if return_code != 0:
+        if self.status != Replica.RUNNING:
+            log.error('Tried to end a replica that was in state: %s... ignoring request!' % self.status)
+        elif return_code != 0:
             log.error('Replica %s-%s returned non-zero code (%s)' % (str(self.id), str(self.sequence), return_code))
             self.status = Replica.ERROR
         elif (datetime.datetime.now()-self.start_time) < datetime.timedelta(minutes=10):
