@@ -2,6 +2,7 @@
 
 # set a title for this setup
 title = My DR
+debug = False
 
 # Paths to system programs
 [system]
