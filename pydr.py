@@ -30,11 +30,13 @@ log.addHandler(ch)
 
 # this is the server listener
 # it runs in a separate thread and contains a running server/manager started on command
-def server_listener(daemon, manager, start=False):
+def server_listener(daemon, manager, start=False, reset=False):
     log.info('Starting server listener...')
     try:
         if start or not os.path.exists(manager.hostfile):
             manager.start()
+            if reset:
+                manager.force_reset()
         while 1:
             if manager.shutdown:
                 break
@@ -54,7 +56,8 @@ def main():
     parser.add_option("-j", "--job-id", dest="job_id", default=str(int(time.time())), help="Job ID [default: %default]")
     parser.add_option("-s", "--start", dest="start_server", action="store_true", default=False, help="Start the server [default: %default]")    
     parser.add_option("-n", "--pbs-nodefile", dest="pbs_nodefile", default=None, help="Contents of $PBS_NODEFILE")
-        
+    parser.add_option("--reset", dest="reset", default=False, action="store_true", help="Restart all replicas and jobs by resetting their status")
+    
     (options, args) = parser.parse_args()
     
     config = setup_config(options.config_file, create=True)
@@ -70,7 +73,7 @@ def main():
     log.info('The daemon is running at: %s:%s' % (daemon.hostname, daemon.port))
     log.info('The manager\'s uri is: %s' % manager_uri)
     
-    thread = Thread(target=server_listener, args=(daemon, manager, options.start_server))
+    thread = Thread(target=server_listener, args=(daemon, manager, options.start_server, options.reset))
     thread.start()
     time.sleep(10)
     
