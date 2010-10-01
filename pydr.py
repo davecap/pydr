@@ -24,7 +24,7 @@ from Pyro.errors import ProtocolError
 log = logging.getLogger("pydr")
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 ch = logging.StreamHandler()
-log.setLevel(logging.DEBUG)
+log.setLevel(logging.INFO)
 ch.setFormatter(formatter)
 log.addHandler(ch)
 
@@ -59,6 +59,10 @@ def main():
     
     config = setup_config(options.config_file, create=True)
     
+    if config['debug']:
+        log.setLevel(logging.DEBUG)
+        log.debug('Debug mode is on!')
+    
     Pyro.core.initServer()
     daemon = Pyro.core.Daemon(port=int(config['manager']['port']))
     manager = Manager(config, daemon, options.job_id)
@@ -68,10 +72,11 @@ def main():
     
     thread = Thread(target=server_listener, args=(daemon, manager, options.start_server))
     thread.start()
-    time.sleep(5)
+    time.sleep(10)
     
     log.debug('Starting client loop...')
     replica = None
+    tries = 0
     
     try:
         while True:
@@ -81,7 +86,7 @@ def main():
             # get the server URI from the hostfile
             if not os.path.exists(manager.hostfile):
                 log.error('No hostfile exists! will retry...')
-                time.sleep(2)
+                time.sleep(5)
                 continue
             f = open(manager.hostfile, 'r')
             server_uri = f.readline()
@@ -93,8 +98,11 @@ def main():
             try:
                 server.connect(options.job_id, manager_uri)
             except ProtocolError:
-                log.warning('Could not connect to server, will retry')
+                tries += 1
+                if tries % 100 == 0:
+                    log.warning('Could not connect to server, will retry (tried %d times)' % tries)
             else:
+                tries = 0
                 # see if we need to close a replica that just finished
                 if replica is not None:
                     (command, env) = replica
@@ -107,7 +115,6 @@ def main():
                     replica = None
         
                 log.debug('Asking manager for a replica...')
-                # TODO: handle exceptions
                 replica = server.get_replica(options.job_id, options.pbs_nodefile)
             
                 # if the server returns a replica
@@ -121,9 +128,9 @@ def main():
                     # now just wait until the job is done
                     run_process.wait()
                 else:
-                    log.error('Client did not get a replica from the server')
+                    log.debug('Client did not get a replica from the server')
             finally:
-                time.sleep(5)
+                time.sleep(15)
         # end client loop
     finally:
         manager.stop()
@@ -380,7 +387,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
                         log.debug('Started server on client %s' % self.next_job_id)
                         self.active = False
                 except Exception, ex:
-                    log.error('Could not connect to client (%s)' % str(ex))
+                    log.debug('Could not connect to client (%s)' % str(ex))
     
     def get_replica(self, job_id, pbs_nodefile=None):
         """ Get the next replica for a job to run by calling this """
@@ -501,13 +508,15 @@ class Replica(Pyro.core.ObjBase):
         log.info('Starting run for replica %s-%s (job %s)' % (str(self.id), str(self.sequence), self.job_id))
     
     def stop(self, return_code=0):
+        # TODO: clean this up
         log.info('Ending run for replica %s-%s (job %s)' % (str(self.id), str(self.sequence), self.job_id))
         if self.status != Replica.RUNNING:
             log.error('Tried to end a replica that was in state: %s... ignoring request!' % self.status)
+            return False
         elif return_code != 0:
             log.error('Replica %s-%s returned non-zero code (%s)' % (str(self.id), str(self.sequence), return_code))
             self.status = Replica.ERROR
-        elif (datetime.datetime.now()-self.start_time) < datetime.timedelta(minutes=10):
+        elif self.start_time is not None and (datetime.datetime.now()-self.start_time) < datetime.timedelta(minutes=10):
             log.warning('Replica %s-%s ran for less than 10 minutes' % (str(self.id), str(self.sequence)))
             self.status = Replica.ERROR
         else:
@@ -737,6 +746,8 @@ PYDR_CONFIG_SPEC = """# PyDR Config File
 
 # set a title for this setup
 title = string(default='My DR')
+# enable log debug mode?
+debug = boolean(default=False)
 
 # Paths to system programs
 [system]
