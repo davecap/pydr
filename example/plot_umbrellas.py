@@ -36,16 +36,6 @@ def main():
     for r_id, r_config in config['replicas'].items():
         coordinate = float(r_config['coordinate'])
         k = float(r_config['k'])
-        #rad2deg = (lambda x: x*1)
-        rad2deg = (lambda x: x*180./pi)
-
-        degrees = []
-        for rad in data_chi1:
-            deg = rad2deg(rad)
-            if deg < 0:
-                deg += 360
-            degrees.append(deg)
-        
         # generate umbrellas for each coord/k
         x = numpy.arange(coordinate-10.0,coordinate+10.1,0.1)
         y = [ 0.5*k*(i-coordinate)*(i-coordinate) for i in x ]
@@ -53,7 +43,7 @@ def main():
     
     # complete and show the plot
     ax.set_xlim(0, 360)
-    ax.set_ylim(0, 5)
+    ax.set_ylim(0, 1)
     ax.set_xlabel(r'Coordinate')
     ax.set_ylabel(r'Harmonic Restraint')
     ax.set_title('')
