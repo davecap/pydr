@@ -534,8 +534,6 @@ class Replica(Pyro.core.ObjBase):
             return False
         elif return_code != 0:
             log.error('Replica %s-%s returned non-zero code (%s)' % (str(self.id), str(self.sequence), return_code))
-            log.error('Stopping replica and decreasing sequence number by 1')
-            self.sequence -= 1
             self.status = Replica.STOPPED
         else:
             self.status = self.READY
@@ -807,7 +805,7 @@ debug = boolean(default=False)
     ppn = integer(min=1, max=64, default=1)
     # nodes per job
     nodes = integer(min=1, max=9999999, default=1)
-    # walltime in seconds
+    # walltime in seconds, this will be converted into the PBS submit script walltime format (1:00:00)
     walltime = integer(min=1, max=999999, default=86400)
     # estimated runtime of a single replica run. Manager will reset a replica that has exceeded this walltime
     replica_walltime = integer(min=0, max=999999, default=10000)
@@ -818,20 +816,6 @@ debug = boolean(default=False)
     # it defaults to run.sh (located in the same directory as config.ini)
     # replica variables are passed to this script via the client
     run_script = string(default='run.sh')
-    
-    # files section will be used in the near future
-    # [[files]]
-        # link files are not modified but are required by each replica/sequence, they are linked to save disk space
-        # ex: link = initial.pdb, initial.psf
-        # link = string_list(min=0, default=list())
-        
-        # copy files are files copied to each sequence. They may be modified by the run script at run-time
-        # copy = md.conf, tclforces.tcl
-        # copy = string_list(min=0, default=list())
-        
-        # restart files are output files expected after a replica is done running
-        # ex: restart = restart.vel, restart.coor, restart.xsc
-        # restart = string_list(min=0, default=list())
 
 # Replica settings
 [replicas]
@@ -848,6 +832,20 @@ debug = boolean(default=False)
 
 # END
 """
+
+# files section will be used in the near future
+# [[files]]
+    # link files are not modified but are required by each replica/sequence, they are linked to save disk space
+    # ex: link = initial.pdb, initial.psf
+    # link = string_list(min=0, default=list())
+    
+    # copy files are files copied to each sequence. They may be modified by the run script at run-time
+    # copy = md.conf, tclforces.tcl
+    # copy = string_list(min=0, default=list())
+    
+    # restart files are output files expected after a replica is done running
+    # ex: restart = restart.vel, restart.coor, restart.xsc
+    # restart = string_list(min=0, default=list())
 
 def setup_config(path='config.ini', create=False):
     # validate the config
