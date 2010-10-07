@@ -337,11 +337,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
         for j in self.jobs:
             now = datetime.datetime.now()
             if not j.completed():
-                try:
-                    j.stop_time = now
-                except:
-                    # TODO: fix this later.. make sure old Job objects can be reset
-                    pass
+                j.stop_time = now
     
     # TODO: rename these functions!
     def get_all_replicas(self):
@@ -717,7 +713,10 @@ python ${pydr_path} -j $PBS_JOBID
         if not self.started:
             return False
         else:
-            return datetime.datetime.now() >= self.stop_time
+            try:
+                return datetime.datetime.now() >= self.stop_time
+            except:
+                return True
         
         # TODO: look at actual job status
         #   this could be too slow, so for now just look at predicted times
