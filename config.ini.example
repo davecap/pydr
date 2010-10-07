@@ -53,20 +53,6 @@ debug = False
     # replica variables are passed to this script via the client
     run_script = run.sh
 
-# files section will be used in the near future
-# [[files]]
-# link files are not modified but are required by each replica/sequence, they are linked to save disk space
-# ex: link = initial.pdb, initial.psf
-# link = string_list(min=0, default=list())
-
-# copy files are files copied to each sequence. They may be modified by the run script at run-time
-# copy = md.conf, tclforces.tcl
-# copy = string_list(min=0, default=list())
-
-# restart files are output files expected after a replica is done running
-# ex: restart = restart.vel, restart.coor, restart.xsc
-# restart = string_list(min=0, default=list())
-
 # Replica settings
 [replicas]
     # each replica is listed here numbered from 0 to N

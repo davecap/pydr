@@ -253,9 +253,8 @@ class Manager(Pyro.core.SynchronizedObjBase):
             return True
 
         # look for any timed-out replicas
-        now = datetime.datetime.now()
         for r_id, r in self.replicas.items():
-            if r.status == Replica.RUNNING and now >= r.timeout_time:
+            if r.status == Replica.RUNNING and datetime.datetime.now() >= r.timeout_time:
                 log.error('Replica %s timed-out, ending the run' % r_id)
                 r.stop(return_code=1)
 
@@ -409,6 +408,9 @@ class Manager(Pyro.core.SynchronizedObjBase):
             log.error('Server is not active... will not send the client anything')
         elif job is None:
             log.error('Client with invalid job_id (%s) pinged the server!' % (job_id))
+        elif job.end_time < datetime.datetime.now() + datetime.timedelta(seconds=float(self.manager.config['job']['replica_walltime'])):
+            # see if the remaining walltime < replica walltime (make sure a replica run can finish in time)
+            log.warning("Client job doesn't have enough time left to run a replica, will not send one.")
         else:
             # Replica selection algorithm
             r = self.rsa_class.select(self.replicas)
