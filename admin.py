@@ -67,7 +67,7 @@ def main():
     if options.show_single_replica is not None:
          replica_id = options.show_single_replica
          if replica_id in replicas.keys():
-             print r
+             print  replicas[replica_id] 
     elif options.show_all_replicas:
         for r in replicas.values():
             try:
