@@ -72,7 +72,12 @@ def main():
              print r
     elif options.show_all_replicas:
         for r in replicas.values():
-            print r
+            try:
+                job = [ j for j in jobs if j.id == r.job_id ][0]
+                job = "%s %s" % (job.id, job.uri)
+            except:
+                job = "no job"
+            print 'Replica %s:%s -> %s' % (str(r.id), r.status, job))
     
     if options.show_all_jobs:
         for j in jobs:
