@@ -30,6 +30,7 @@ def main():
     parser.add_option("-f", dest="set_replica_finished", default=None, help="Set a replica to FINISHED [default: %default]")
     # force reset
     parser.add_option("--force-reset", dest="force_reset", default=False, action="store_true", help="Force reset of all replicas and jobs in case of a crash [default: %default]")
+    parser.add_option("--ready-stopped", dest="ready_stopped", default=False, action="store_true", help="Set all stopped replicas to ready [default: %default]")
         
     (options, args) = parser.parse_args()
     
@@ -51,11 +52,19 @@ def main():
     server._setTimeout(1)
     
     replicas = server.get_all_replicas()
+    jobs = server.get_all_jobs()
     
     if options.force_reset:
         print "Resetting all replicas and jobs!!"
         server.force_reset()
         return
+    
+    if options.ready_stopped:
+        print "Setting stopped replicas to ready..."
+        for r_id, r in replicas.items():
+            if r.status == Replica.STOPPED:
+                if server.set_replica_status(replica_id=r_id, status=Replica.READY):
+                    print "Could not change the replica status!"
     
     if options.show_single_replica is not None:
          replica_id = options.show_single_replica
@@ -66,7 +75,6 @@ def main():
             print r
     
     if options.show_all_jobs:
-        jobs = server.get_all_jobs()
         for j in jobs:
             if not j.completed():
                 if j.replica_id is not None:
