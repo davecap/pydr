@@ -196,6 +196,8 @@ class Manager(Pyro.core.SynchronizedObjBase):
         self.start_time = datetime.datetime.now()
         # last time a snapshot was made (in seconds since the manager started)
         self.last_snapshot_time = 0
+        # last time an auto-submit was made to transfer the manager
+        self.last_autosubmit_time = 0
         # snapshot file path
         self.snapshot_path = os.path.join(self.project_path, self.config['manager']['snapshotfile'])
         # host file path
@@ -276,21 +278,14 @@ class Manager(Pyro.core.SynchronizedObjBase):
         # runnable replicas as those that aren't STOPPED
         runnable_replicas = [ r for r in self.replicas.values() if r.status != Replica.STOPPED ]
         # count how many jobs we need to submit
-        new_jobs_needed = len(runnable_replicas) - len(running_jobs)
+        new_jobs_needed = len(runnable_replicas)-len(running_jobs)
         # generate a list of new jobs to submit (below)
         jobs_to_submit = [ Job(self) for j in range(new_jobs_needed) ]
         
         # submit a new job every autosubmit_interval seconds (usually every hour)
-        try:
-            # if we have already submitted jobs, take latest submit time
-            timedelta = datetime.datetime.now() - self.jobs[-1].submit_time
-            seconds_since_last_submit = timedelta.seconds + timedelta.days*24*60*60
-        except:
-            # by default, submit an extra job
-            seconds_since_last_submit = 0
-        
         # if it's time to submit...        
-        if (self._seconds_since_start()/self.config['manager']['autosubmit_interval']) > (seconds_since_last_submit/self.config['manager']['autosubmit_interval']):
+        if (self._seconds_since_start()/self.config['manager']['autosubmit_interval']) > (self.last_autosubmit_time/self.config['manager']['autosubmit_interval']):
+            self.last_autosubmit_time = self._seconds_since_start()
             jobs_to_submit.append(Job(self))
         
         if len(jobs_to_submit) > 0:
@@ -378,7 +373,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
     
     def connect(self, job_id, listener_uri):
         """ Clients make contact with the server by calling this """
-        log.info('Job %s connected.' % str(job_id))        
+        log.debug('Job %s connected.' % str(job_id))        
         job = self.find_job_by_id(job_id, create=True)
         # if this is the first time
         if not job.started:
@@ -396,14 +391,14 @@ class Manager(Pyro.core.SynchronizedObjBase):
                 server_listener._setTimeout(2)
                 try:
                     if server_listener.start():
-                        log.debug('Transferred server to job %s' % str(job_id))
+                        log.info('Sucessfully transferred manager to job %s' % str(job_id))
                         self.active = False
                 except Exception, ex:
                     log.debug('Could not connect to client (%s)' % str(ex))
     
     def get_replica(self, job_id, pbs_nodefile=''):
         """ Get the next replica for a job to run by calling this """
-        log.info('Job %s wants a replica' % str(job_id))        
+        log.debug('Job %s wants a replica' % str(job_id))        
         job = self.find_job_by_id(job_id)
         if not self.active:
             log.error('Server is not active... will not send the client anything')
@@ -421,7 +416,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
                 r.start(job.id)
                 return (r.command(), r.environment_variables(PBS_JOBID=job.id, PBS_NODEFILE=pbs_nodefile))
             else:
-                log.warning('No replicas ready to run')
+                log.debug('No replicas ready to run')
         return None
     
     def end_replica(self, replica_id, job_id, return_code):
@@ -642,7 +637,7 @@ python ${pydr_path} -j $PBS_JOBID
     
     def submit(self):
         """ Submit a job using qsub """        
-        log.info('Submitting job...')
+        log.debug('Submitting job...')
         self.submit_time = datetime.datetime.now()
         # note: client will send the job_id back to server to associate a replica with a job
         qsub_path = self.manager.config['system']['qsub']
