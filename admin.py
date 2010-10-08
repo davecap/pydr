@@ -24,10 +24,8 @@ def main():
     parser.add_option("-j", dest="show_all_jobs", default=False, action="store_true", help="Show all jobs [default: %default]")
     # set replica ready
     parser.add_option("-r", dest="set_replica_ready", default=None, help="Set a replica to READY [default: %default]")
-    # set replica error
-    parser.add_option("-e", dest="set_replica_error", default=None, help="Set a replica to ERROR [default: %default]")
-    # set replica finished
-    parser.add_option("-f", dest="set_replica_finished", default=None, help="Set a replica to FINISHED [default: %default]")
+    # set replica stopped
+    parser.add_option("-f", dest="set_replica_stopped", default=None, help="Set a replica to STOPPED [default: %default]")
     # force reset
     parser.add_option("--force-reset", dest="force_reset", default=False, action="store_true", help="Force reset of all replicas and jobs in case of a crash [default: %default]")
     parser.add_option("--ready-stopped", dest="ready_stopped", default=False, action="store_true", help="Set all stopped replicas to ready [default: %default]")
@@ -63,7 +61,7 @@ def main():
         print "Setting stopped replicas to ready..."
         for r_id, r in replicas.items():
             if r.status == Replica.STOPPED:
-                if server.set_replica_status(replica_id=r_id, status=Replica.READY):
+                if not server.set_replica_status(replica_id=r_id, status=Replica.READY):
                     print "Could not change the replica status!"
     
     if options.show_single_replica is not None:
@@ -74,10 +72,10 @@ def main():
         for r in replicas.values():
             try:
                 job = [ j for j in jobs if j.id == r.job_id ][0]
-                job = "%s %s" % (job.id, job.uri)
+                job = job.id
             except:
                 job = "no job"
-            print 'Replica %s:%s -> %s' % (str(r.id), r.status, job))
+            print 'Replica %s:%s -> %s' % (str(r.id), r.status, job)
     
     if options.show_all_jobs:
         for j in jobs:
@@ -99,23 +97,14 @@ def main():
         else:
             print "Invalid replica id %s" % replica_id
     
-    if options.set_replica_finished is not None:
-        replica_id = options.set_replica_finished
+    if options.set_replica_stopped is not None:
+        replica_id = options.set_replica_stopped
         if replica_id in replicas.keys():
-            print "Setting replica %s status from %s to finished" % (replica_id, replicas[replica_id].status)
-            if not server.set_replica_status(replica_id=replica_id, status=Replica.FINISHED):
+            print "Setting replica %s status from %s to stopped" % (replica_id, replicas[replica_id].status)
+            if not server.set_replica_status(replica_id=replica_id, status=Replica.STOPPED):
                 print "Could not change the replica status!"
         else:
             print "Invalid replica id %s" % replica_id
     
-    if options.set_replica_error is not None:
-        replica_id = options.set_replica_error
-        if replica_id in replicas.keys():
-            print "Setting replica %s status from %s to error" % (replica_id, replicas[replica_id].status)
-            if not server.set_replica_status(replica_id=replica_id, status=Replica.ERROR):
-                print "Could not change the replica status!"
-        else:
-            print "Invalid replica id %s" % replica_id
-            
 if __name__=='__main__':
     main()
