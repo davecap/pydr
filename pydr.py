@@ -336,8 +336,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
     def force_reset(self):
         log.info("Setting all RUNNING replicas to READY...")
         for r in self.replicas.values():
-            if r.status == Replica.RUNNING:
-                r.stop()
+            r.stop()
         log.info("Clearing job stack...")
         self.jobs = []
     
@@ -531,9 +530,8 @@ class Replica(Pyro.core.ObjBase):
         """ Stop the run """
         log.info('Ending run for replica %s-%s (job %s)' % (str(self.id), str(self.sequence), self.job_id))
         if self.status != Replica.RUNNING:
-            log.error('Tried to end a replica that was in state: %s... ignoring request!' % self.status)
-            return False
-        elif return_code != 0:
+            log.warning('Replica ended was in state: %s' % self.status)
+        if return_code != 0:
             log.error('Replica %s-%s returned non-zero code (%s)' % (str(self.id), str(self.sequence), return_code))
             self.status = Replica.STOPPED
         else:
