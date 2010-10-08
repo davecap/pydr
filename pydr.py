@@ -410,7 +410,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
             log.error('Server is not active... will not send the client anything')
         elif job is None:
             log.error('Client with invalid job_id (%s) pinged the server!' % (job_id))
-        elif job.end_time < datetime.datetime.now() + datetime.timedelta(seconds=float(self.manager.config['job']['replica_walltime'])):
+        elif job.stop_time < datetime.datetime.now() + datetime.timedelta(seconds=float(self.manager.config['job']['replica_walltime'])):
             # see if the remaining walltime < replica walltime (make sure a replica run can finish in time)
             log.warning("Client job doesn't have enough time left to run a replica, will not send one.")
         else:
