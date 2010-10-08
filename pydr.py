@@ -338,10 +338,8 @@ class Manager(Pyro.core.SynchronizedObjBase):
         for r in self.replicas.values():
             if r.status == Replica.RUNNING:
                 r.stop()
-        for j in self.jobs:
-            now = datetime.datetime.now()
-            if not j.completed():
-                j.stop_time = now
+        log.info("Clearing job stack...")
+        self.jobs = []
     
     # TODO: rename these functions!
     def get_all_replicas(self):
@@ -421,8 +419,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
             if r is not None:
                 log.info('Sending replica %s to client with job id %s' % (r.id, job.id))
                 job.replica_id = r.id
-                r.job_id = job.id
-                r.start()
+                r.start(job.id)
                 return (r.command(), r.environment_variables(PBS_JOBID=job.id, PBS_NODEFILE=pbs_nodefile))
             else:
                 log.warning('No replicas ready to run')
@@ -521,17 +518,17 @@ class Replica(Pyro.core.ObjBase):
     def __repr__(self):
         return '<Replica %s:%s>' % (str(self.id), self.status)
     
-    def start(self):
+    def start(self, job_id):
         """ Start the replica run, set the status to RUNNING """
         self.start_time = datetime.datetime.now()
         self.timeout_time = self.start_time + datetime.timedelta(seconds=float(self.manager.config['job']['replica_walltime']))
         self.status = self.RUNNING
         self.sequence += 1
+        self.job_id = job_id
         log.info('Starting run for replica %s-%s (job %s)' % (str(self.id), str(self.sequence), self.job_id))
     
     def stop(self, return_code=0):
         """ Stop the run """
-        # TODO: clean this up
         log.info('Ending run for replica %s-%s (job %s)' % (str(self.id), str(self.sequence), self.job_id))
         if self.status != Replica.RUNNING:
             log.error('Tried to end a replica that was in state: %s... ignoring request!' % self.status)
@@ -543,6 +540,7 @@ class Replica(Pyro.core.ObjBase):
             self.status = self.READY
         self.start_time = None
         self.timeout_time = None
+        self.job_id = None
         return True
     
     def environment_variables(self, **kwargs):
