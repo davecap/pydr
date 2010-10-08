@@ -104,7 +104,7 @@ def main():
                 f.close()
                 # connect to server: job_id, time_left, manager_uri
                 server = Pyro.core.getProxyForURI(server_uri)
-                server._setTimeout(1)
+                server._setTimeout(10)
         
             try:
                 # try connecting to the server, let it know that this job has started!
