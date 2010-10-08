@@ -587,7 +587,7 @@ python ${pydr_path} -j $PBS_JOBID
         return self.manager.config['job']['name']
     
     def has_seconds_remaining(self, seconds):
-        return self.stop_time < datetime.datetime.now() + datetime.timedelta(seconds=seconds)
+        return self.stop_time > datetime.datetime.now() + datetime.timedelta(seconds=seconds)
             
     def start(self):
         self.start_time = datetime.datetime.now()
