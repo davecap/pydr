@@ -10,15 +10,18 @@ import datetime
 import math
 import pickle
 import copy
-from xml.dom.minidom import parseString
 from string import Template
+
+from xml.dom.minidom import parseString
 from configobj import ConfigObj, flatten_errors
 from validate import Validator
-import signal
 from threading import Thread
 
 import Pyro.core
 from Pyro.errors import ProtocolError
+
+# tables for replica log
+# import tables
 
 # setup logging
 log = logging.getLogger("pydr")
@@ -101,7 +104,7 @@ def main():
                 f.close()
                 # connect to server: job_id, time_left, manager_uri
                 server = Pyro.core.getProxyForURI(server_uri)
-                server._setTimeout(1)
+                server._setTimeout(10)
         
             try:
                 # try connecting to the server, let it know that this job has started!
@@ -193,6 +196,8 @@ class Manager(Pyro.core.SynchronizedObjBase):
         self.start_time = datetime.datetime.now()
         # last time a snapshot was made (in seconds since the manager started)
         self.last_snapshot_time = 0
+        # last time an auto-submit was made to transfer the manager
+        self.last_autosubmit_time = 0
         # snapshot file path
         self.snapshot_path = os.path.join(self.project_path, self.config['manager']['snapshotfile'])
         # host file path
@@ -273,20 +278,14 @@ class Manager(Pyro.core.SynchronizedObjBase):
         # runnable replicas as those that aren't STOPPED
         runnable_replicas = [ r for r in self.replicas.values() if r.status != Replica.STOPPED ]
         # count how many jobs we need to submit
-        new_jobs_needed = len(runnable_replicas) - len(running_jobs)
+        new_jobs_needed = len(runnable_replicas)-len(running_jobs)
         # generate a list of new jobs to submit (below)
         jobs_to_submit = [ Job(self) for j in range(new_jobs_needed) ]
         
         # submit a new job every autosubmit_interval seconds (usually every hour)
-        try:
-            # if we have already submitted jobs, take latest submit time
-            last_submit_time = self.jobs[-1].submit_time
-        except:
-            # by default, submit an extra job
-            last_submit_time = 0
-        
         # if it's time to submit...        
-        if (self._seconds_since_start()/self.config['manager']['autosubmit_interval']) > (last_submit_time/self.config['manager']['autosubmit_interval']):
+        if (self._seconds_since_start()/self.config['manager']['autosubmit_interval']) > (self.last_autosubmit_time/self.config['manager']['autosubmit_interval']):
+            self.last_autosubmit_time = self._seconds_since_start()
             jobs_to_submit.append(Job(self))
         
         if len(jobs_to_submit) > 0:
@@ -332,12 +331,9 @@ class Manager(Pyro.core.SynchronizedObjBase):
     def force_reset(self):
         log.info("Setting all RUNNING replicas to READY...")
         for r in self.replicas.values():
-            if r.status == Replica.RUNNING:
-                r.stop()
-        for j in self.jobs:
-            now = datetime.datetime.now()
-            if not j.completed():
-                j.stop_time = now
+            r.stop()
+        log.info("Clearing job stack...")
+        self.jobs = []
     
     # TODO: rename these functions!
     def get_all_replicas(self):
@@ -377,7 +373,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
     
     def connect(self, job_id, listener_uri):
         """ Clients make contact with the server by calling this """
-        log.info('Job %s connected.' % str(job_id))        
+        log.debug('Job %s connected.' % str(job_id))        
         job = self.find_job_by_id(job_id, create=True)
         # if this is the first time
         if not job.started:
@@ -395,20 +391,20 @@ class Manager(Pyro.core.SynchronizedObjBase):
                 server_listener._setTimeout(2)
                 try:
                     if server_listener.start():
-                        log.debug('Transferred server to job %s' % str(job_id))
+                        log.info('Sucessfully transferred manager to job %s' % str(job_id))
                         self.active = False
                 except Exception, ex:
                     log.debug('Could not connect to client (%s)' % str(ex))
     
     def get_replica(self, job_id, pbs_nodefile=''):
         """ Get the next replica for a job to run by calling this """
-        log.info('Job %s wants a replica' % str(job_id))        
+        log.debug('Job %s wants a replica' % str(job_id))        
         job = self.find_job_by_id(job_id)
         if not self.active:
             log.error('Server is not active... will not send the client anything')
         elif job is None:
             log.error('Client with invalid job_id (%s) pinged the server!' % (job_id))
-        elif job.end_time < datetime.datetime.now() + datetime.timedelta(seconds=float(self.manager.config['job']['replica_walltime'])):
+        elif not job.has_seconds_remaining(float(self.config['job']['replica_walltime'])):
             # see if the remaining walltime < replica walltime (make sure a replica run can finish in time)
             log.warning("Client job doesn't have enough time left to run a replica, will not send one.")
         else:
@@ -417,11 +413,10 @@ class Manager(Pyro.core.SynchronizedObjBase):
             if r is not None:
                 log.info('Sending replica %s to client with job id %s' % (r.id, job.id))
                 job.replica_id = r.id
-                r.job_id = job.id
-                r.start()
+                r.start(job.id)
                 return (r.command(), r.environment_variables(PBS_JOBID=job.id, PBS_NODEFILE=pbs_nodefile))
             else:
-                log.warning('No replicas ready to run')
+                log.debug('No replicas ready to run')
         return None
     
     def end_replica(self, replica_id, job_id, return_code):
@@ -517,30 +512,28 @@ class Replica(Pyro.core.ObjBase):
     def __repr__(self):
         return '<Replica %s:%s>' % (str(self.id), self.status)
     
-    def start(self):
+    def start(self, job_id):
         """ Start the replica run, set the status to RUNNING """
         self.start_time = datetime.datetime.now()
         self.timeout_time = self.start_time + datetime.timedelta(seconds=float(self.manager.config['job']['replica_walltime']))
         self.status = self.RUNNING
         self.sequence += 1
+        self.job_id = job_id
         log.info('Starting run for replica %s-%s (job %s)' % (str(self.id), str(self.sequence), self.job_id))
     
     def stop(self, return_code=0):
         """ Stop the run """
-        # TODO: clean this up
         log.info('Ending run for replica %s-%s (job %s)' % (str(self.id), str(self.sequence), self.job_id))
         if self.status != Replica.RUNNING:
-            log.error('Tried to end a replica that was in state: %s... ignoring request!' % self.status)
-            return False
-        elif return_code != 0:
+            log.warning('Replica ended was in state: %s' % self.status)
+        if return_code != 0:
             log.error('Replica %s-%s returned non-zero code (%s)' % (str(self.id), str(self.sequence), return_code))
-            log.error('Stopping replica and decreasing sequence number by 1')
-            self.sequence -= 1
             self.status = Replica.STOPPED
         else:
             self.status = self.READY
         self.start_time = None
         self.timeout_time = None
+        self.job_id = None
         return True
     
     def environment_variables(self, **kwargs):
@@ -585,7 +578,10 @@ python ${pydr_path} -j $PBS_JOBID
     
     def job_name(self):
         return self.manager.config['job']['name']
-        
+    
+    def has_seconds_remaining(self, seconds):
+        return self.stop_time > datetime.datetime.now() + datetime.timedelta(seconds=seconds)
+            
     def start(self):
         self.start_time = datetime.datetime.now()
         # end time should be start time + walltime
@@ -641,7 +637,7 @@ python ${pydr_path} -j $PBS_JOBID
     
     def submit(self):
         """ Submit a job using qsub """        
-        log.info('Submitting job...')
+        log.debug('Submitting job...')
         self.submit_time = datetime.datetime.now()
         # note: client will send the job_id back to server to associate a replica with a job
         qsub_path = self.manager.config['system']['qsub']
@@ -712,7 +708,13 @@ python ${pydr_path} -j $PBS_JOBID
 
     def completed(self):
         """ See if the job is completed or not """
-        return self.started and datetime.datetime.now() >= self.stop_time
+        if not self.started:
+            return False
+        else:
+            try:
+                return datetime.datetime.now() >= self.stop_time
+            except:
+                return True
         
         # TODO: look at actual job status
         #   this could be too slow, so for now just look at predicted times
@@ -786,8 +788,6 @@ debug = boolean(default=False)
     hostfile = string(default='hostfile')
     # Automatically submit (qsub) jobs as required when the manager is launched
     autosubmit = boolean(default=True)
-    # time between submitting new jobs, by default a new job will be submitted every hour!
-    autosubmit_interval = integer(min=3600, max=999999, default=3600)
     # submit host, ssh to this host when running qsub to submit jobs
     submit_host = string(default='gpc01')
     # approximate time interval in seconds for saving snapshots
@@ -798,6 +798,8 @@ debug = boolean(default=False)
     replica_selection_class = string(default='RSARandomReplica')
     # mobile server enabled?
     mobile = boolean(default=True)
+    # time between submitting new jobs (for mobile server), by default a new job will be submitted every hour!
+    autosubmit_interval = integer(min=3600, max=999999, default=3600)
 
 # Job-specific configuration
 [job]
@@ -807,7 +809,7 @@ debug = boolean(default=False)
     ppn = integer(min=1, max=64, default=1)
     # nodes per job
     nodes = integer(min=1, max=9999999, default=1)
-    # walltime in seconds
+    # walltime in seconds, this will be converted into the PBS submit script walltime format (1:00:00)
     walltime = integer(min=1, max=999999, default=86400)
     # estimated runtime of a single replica run. Manager will reset a replica that has exceeded this walltime
     replica_walltime = integer(min=0, max=999999, default=10000)
@@ -818,20 +820,6 @@ debug = boolean(default=False)
     # it defaults to run.sh (located in the same directory as config.ini)
     # replica variables are passed to this script via the client
     run_script = string(default='run.sh')
-    
-    # files section will be used in the near future
-    # [[files]]
-        # link files are not modified but are required by each replica/sequence, they are linked to save disk space
-        # ex: link = initial.pdb, initial.psf
-        # link = string_list(min=0, default=list())
-        
-        # copy files are files copied to each sequence. They may be modified by the run script at run-time
-        # copy = md.conf, tclforces.tcl
-        # copy = string_list(min=0, default=list())
-        
-        # restart files are output files expected after a replica is done running
-        # ex: restart = restart.vel, restart.coor, restart.xsc
-        # restart = string_list(min=0, default=list())
 
 # Replica settings
 [replicas]
@@ -849,6 +837,20 @@ debug = boolean(default=False)
 # END
 """
 
+# files section will be used in the near future
+# [[files]]
+    # link files are not modified but are required by each replica/sequence, they are linked to save disk space
+    # ex: link = initial.pdb, initial.psf
+    # link = string_list(min=0, default=list())
+    
+    # copy files are files copied to each sequence. They may be modified by the run script at run-time
+    # copy = md.conf, tclforces.tcl
+    # copy = string_list(min=0, default=list())
+    
+    # restart files are output files expected after a replica is done running
+    # ex: restart = restart.vel, restart.coor, restart.xsc
+    # restart = string_list(min=0, default=list())
+
 def setup_config(path='config.ini', create=False):
     # validate the config
     config = ConfigObj(path, configspec=PYDR_CONFIG_SPEC.split("\n"))
@@ -862,6 +864,15 @@ def setup_config(path='config.ini', create=False):
         config.write()
     else:
         result = config.validate(validator, preserve_errors=True)
+        # autosubmit_interval should be less than job walltime
+        if config['manager']['mobile'] and config['manager']['autosubmit'] and config['manager']['autosubmit_interval'] > (config['job']['walltime']-3600):
+            raise Exception('Autosubmit interval is greater than job walltime, mobile server will not work!')
+        # snapshottime should be less than job walltime
+        if config['manager']['snapshottime'] > config['job']['walltime']:
+            raise Exception('Snapshot time is greater than job walltime!')
+        # replica_walltime should be less than job walltime
+        if config['job']['replica_walltime'] >= config['job']['walltime']:
+            raise Exception('Replica walltime should be less than job walltime!')
         # show config errors if there are any
         if type(result) is dict:
             for entry in flatten_errors(config, result):
