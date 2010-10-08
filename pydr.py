@@ -10,15 +10,18 @@ import datetime
 import math
 import pickle
 import copy
-from xml.dom.minidom import parseString
 from string import Template
+
+from xml.dom.minidom import parseString
 from configobj import ConfigObj, flatten_errors
 from validate import Validator
-import signal
 from threading import Thread
 
 import Pyro.core
 from Pyro.errors import ProtocolError
+
+# tables for replica log
+# import tables
 
 # setup logging
 log = logging.getLogger("pydr")
@@ -280,13 +283,14 @@ class Manager(Pyro.core.SynchronizedObjBase):
         # submit a new job every autosubmit_interval seconds (usually every hour)
         try:
             # if we have already submitted jobs, take latest submit time
-            last_submit_time = self.jobs[-1].submit_time
+            timedelta = datetime.datetime.now() - self.jobs[-1].submit_time
+            seconds_since_last_submit = timedelta.seconds + timedelta.days*24*60*60
         except:
             # by default, submit an extra job
-            last_submit_time = 0
+            seconds_since_last_submit = 0
         
         # if it's time to submit...        
-        if (self._seconds_since_start()/self.config['manager']['autosubmit_interval']) > (last_submit_time/self.config['manager']['autosubmit_interval']):
+        if (self._seconds_since_start()/self.config['manager']['autosubmit_interval']) > (seconds_since_last_submit/self.config['manager']['autosubmit_interval']):
             jobs_to_submit.append(Job(self))
         
         if len(jobs_to_submit) > 0:
@@ -790,8 +794,6 @@ debug = boolean(default=False)
     hostfile = string(default='hostfile')
     # Automatically submit (qsub) jobs as required when the manager is launched
     autosubmit = boolean(default=True)
-    # time between submitting new jobs, by default a new job will be submitted every hour!
-    autosubmit_interval = integer(min=3600, max=999999, default=3600)
     # submit host, ssh to this host when running qsub to submit jobs
     submit_host = string(default='gpc01')
     # approximate time interval in seconds for saving snapshots
@@ -802,6 +804,8 @@ debug = boolean(default=False)
     replica_selection_class = string(default='RSARandomReplica')
     # mobile server enabled?
     mobile = boolean(default=True)
+    # time between submitting new jobs (for mobile server), by default a new job will be submitted every hour!
+    autosubmit_interval = integer(min=3600, max=999999, default=3600)
 
 # Job-specific configuration
 [job]
@@ -866,6 +870,15 @@ def setup_config(path='config.ini', create=False):
         config.write()
     else:
         result = config.validate(validator, preserve_errors=True)
+        # autosubmit_interval should be less than job walltime
+        if config['manager']['mobile'] and config['manager']['autosubmit'] and config['manager']['autosubmit_interval'] > (config['job']['walltime']-3600):
+            raise Exception('Autosubmit interval is greater than job walltime, mobile server will not work!')
+        # snapshottime should be less than job walltime
+        if config['manager']['snapshottime'] > config['job']['walltime']:
+            raise Exception('Snapshot time is greater than job walltime!')
+        # replica_walltime should be less than job walltime
+        if config['job']['replica_walltime'] >= config['job']['walltime']:
+            raise Exception('Replica walltime should be less than job walltime!')
         # show config errors if there are any
         if type(result) is dict:
             for entry in flatten_errors(config, result):
