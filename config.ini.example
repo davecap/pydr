@@ -2,7 +2,6 @@
 
 # set a title for this setup
 title = My DR
-# enable log debug mode?
 debug = False
 
 # Paths to system programs
@@ -20,8 +19,6 @@ debug = False
     hostfile = hostfile
     # Automatically submit (qsub) jobs as required when the manager is launched
     autosubmit = True
-    # time between submitting new jobs, by default a new job will be submitted every hour!
-    autosubmit_interval = 3600
     # submit host, ssh to this host when running qsub to submit jobs
     submit_host = gpc01
     # approximate time interval in seconds for saving snapshots
@@ -43,8 +40,10 @@ debug = False
     nodes = 1
     # walltime in seconds
     walltime = 86400
-    # estimated runtime of a single replica run. Manager will reset a replica that has exceeded this walltime
-    replica_walltime = 10000
+    # MPI flags set within the script
+    mpiflags = -mca btl_sm_num_fifos 7 -mca mpi_paffinity_alone 1 -mca btl_openib_eager_limit 32767 -np $(wc -l $PBS_NODEFILE | gawk '{print $1}') -machinefile $PBS_NODEFILE
+    # timeout before server resubmits a job
+    timeout = 10000
     # job submit script
     submit_script = submit.sh
     
@@ -56,12 +55,12 @@ debug = False
 # Replica settings
 [replicas]
     # each replica is listed here numbered from 0 to N
-    # [[0]]
-    #     k = 0.1
-    #     coordinate = 10
-    # [[1]]
-    #     k = 0.1
-    #     coordinate = 20
+    [[0]]
+        k = 0.1
+        coordinate = 10
+    [[1]]
+        k = 0.1
+        coordinate = 20
     # [[2]]
     #     k = 0.1
     #     coordinate = 30
