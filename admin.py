@@ -19,13 +19,12 @@ def main():
     parser.add_option("-c", "--config", dest="config_file", default="config.ini", help="Config file [default: %default]")
     # show replicas
     parser.add_option("-l", dest="show_all_replicas", default=False, action="store_true", help="Show all replicas [default: %default]")
-    parser.add_option("-s", dest="show_single_replica", default=None, help="Show a single replica [default: %default]")
     # show jobs
     parser.add_option("-j", dest="show_all_jobs", default=False, action="store_true", help="Show all jobs [default: %default]")
     # set replica ready
     parser.add_option("-r", dest="set_replica_ready", default=None, help="Set a replica to READY [default: %default]")
     # set replica stopped
-    parser.add_option("-f", dest="set_replica_stopped", default=None, help="Set a replica to STOPPED [default: %default]")
+    parser.add_option("-s", dest="set_replica_stopped", default=None, help="Set a replica to STOPPED [default: %default]")
     # force reset
     parser.add_option("--force-reset", dest="force_reset", default=False, action="store_true", help="Force reset of all replicas and jobs in case of a crash [default: %default]")
     parser.add_option("--ready-stopped", dest="ready_stopped", default=False, action="store_true", help="Set all stopped replicas to ready [default: %default]")
@@ -64,11 +63,7 @@ def main():
                 if not server.set_replica_status(replica_id=r_id, status=Replica.READY):
                     print "Could not change the replica status!"
     
-    if options.show_single_replica is not None:
-         replica_id = options.show_single_replica
-         if replica_id in replicas.keys():
-             print r
-    elif options.show_all_replicas:
+    if options.show_all_replicas:
         for r in replicas.values():
             try:
                 job = [ j for j in jobs if j.id == r.job_id ][0]

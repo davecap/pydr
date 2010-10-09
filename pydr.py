@@ -425,10 +425,13 @@ class Manager(Pyro.core.SynchronizedObjBase):
         job = self.find_job_by_id(job_id)
         if job is None:
             log.error('Job %s is invalid!' % str(job_id))
-        elif replica_id not in self.replicas:
-            log.error('Job %s trying to clear unknown replica %s!' % (str(job_id), str(replica_id)))
         else:
-            return self.replicas[replica_id].stop(return_code)
+            try:
+                job.replica_id = None
+                self.replicas[replica_id].stop(return_code)
+                return True
+            except Exception, ex:
+                log.error('Exception when stopping replica (%s): %s' % (str(replica_id), str(ex)))
         return False
         
     def end_job(self, job_id):
@@ -438,6 +441,14 @@ class Manager(Pyro.core.SynchronizedObjBase):
         if job is None:
             log.error('Job %s is invalid!' % str(job_id))
         else:
+            # if a job ends while a replica is running on it... stop the replica
+            if job.replica_id is not None:
+                r = self.replicas[job.replica_id]
+                log.error('Job ending while a replica %s is in state %s' % (str(r.id), r.status))
+                if r.status == Replica.RUNNING:
+                    log.error('Ending and stopping replica %s!' % str(r.id))
+                    r.stop(1)
+                job.replica_id = None
             job.stop()
 
 class Snapshot(object):
