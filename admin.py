@@ -25,10 +25,12 @@ def main():
     parser.add_option("-r", dest="set_replica_ready", default=None, help="Set a replica to READY [default: %default]")
     # set replica stopped
     parser.add_option("-s", dest="set_replica_stopped", default=None, help="Set a replica to STOPPED [default: %default]")
+    # enable autosubmit
+    parser.add_option("-a", dest="enable_autosubmit", default=False, action="store_true", help="Enable autosubmit [default: %default]")    
     # force reset
     parser.add_option("--force-reset", dest="force_reset", default=False, action="store_true", help="Force reset of all replicas and jobs in case of a crash [default: %default]")
     parser.add_option("--ready-stopped", dest="ready_stopped", default=False, action="store_true", help="Set all stopped replicas to ready [default: %default]")
-        
+    
     (options, args) = parser.parse_args()
     
     config = setup_config(options.config_file, create=False)
@@ -50,6 +52,10 @@ def main():
     
     replicas = server.get_all_replicas()
     jobs = server.get_all_jobs()
+    
+    if options.enable_autosubmit:
+        print "Enabling autosubmit"
+        server.enable_autosubmit()
     
     if options.force_reset:
         print "Resetting all replicas and jobs!!"

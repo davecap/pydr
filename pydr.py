@@ -336,6 +336,10 @@ class Manager(Pyro.core.SynchronizedObjBase):
         self.jobs = []
     
     # TODO: rename these functions!
+    def enable_autosubmit(self):
+        log.info("Enabling autosubmit!")
+        self.config['manager']['autosubmit'] = True
+    
     def get_all_replicas(self):
         pickle_replicas = {}
         for r_id, r in self.replicas.iteritems():
@@ -356,15 +360,11 @@ class Manager(Pyro.core.SynchronizedObjBase):
     def set_replica_status(self, replica_id, status):
         try:
             r = self.replicas[replica_id]
-            if r.status == Replica.RUNNING:
-                log.warning('Could not change replica %s status... replica is running' % str(replica_id))
-                return False
-            else:
-                log.info('Changing replica %s status from %s to %s' % (str(replica_id), r.status, status))
-                r.status = status
-                return True
-        except:
-            log.error('Could not change replica %s status' % str(replica_id))
+            log.info('Changing replica %s status from %s to %s' % (str(replica_id), r.status, status))
+            r.status = status
+            return True
+        except Exception, ex:
+            log.error('Could not change replica %s status: %s' % (str(replica_id), str(ex))
             return False
 
     #
@@ -401,17 +401,18 @@ class Manager(Pyro.core.SynchronizedObjBase):
         log.debug('Job %s wants a replica' % str(job_id))        
         job = self.find_job_by_id(job_id)
         if not self.active:
-            log.error('Server is not active... will not send the client anything')
+            log.error('Server is not active... will not send the client (%s) anything' % job_id)
         elif job is None:
             log.error('Client with invalid job_id (%s) pinged the server!' % (job_id))
         elif not job.has_seconds_remaining(float(self.config['job']['replica_walltime'])):
             # see if the remaining walltime < replica walltime (make sure a replica run can finish in time)
-            log.warning("Client job doesn't have enough time left to run a replica, will not send one.")
+            if job_id != self.job_id:
+                log.warning("Client job (%s) doesn't have enough time left to run a replica, will not send one." % job_id)
         else:
             # Replica selection algorithm
             r = self.rsa_class.select(self.replicas)
             if r is not None:
-                log.info('Sending replica %s to client with job id %s' % (r.id, job.id))
+                log.info('Sending replica %s to client job %s' % (r.id, job.id))
                 job.replica_id = r.id
                 r.start(job.id)
                 return (r.command(), r.environment_variables(PBS_JOBID=job.id, PBS_NODEFILE=pbs_nodefile))
