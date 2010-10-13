@@ -364,7 +364,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
             r.status = status
             return True
         except Exception, ex:
-            log.error('Could not change replica %s status: %s' % (str(replica_id), str(ex))
+            log.error('Could not change replica %s status: %s' % (str(replica_id), str(ex)))
             return False
 
     #
@@ -421,8 +421,8 @@ class Manager(Pyro.core.SynchronizedObjBase):
         return None
     
     def end_replica(self, replica_id, job_id, return_code):
-        """ Clients call this to clear a replica that finished running """
-        log.info('Job %s is clearing replica %s' % (str(job_id), str(replica_id)))        
+        """ Clients call this to end a replica that finished running """
+        log.info('Job %s is ending replica %s' % (str(job_id), str(replica_id)))        
         job = self.find_job_by_id(job_id)
         if job is None:
             log.error('Job %s is invalid!' % str(job_id))
