@@ -369,7 +369,6 @@ class Manager(Pyro.core.SynchronizedObjBase):
                     'last_autosubmit_time': self.last_autosubmit_time,
                     'snapshot_path': self.snapshot_path,
                     'hostfile': self.hostfile,
-                    'rsa_class': self.rsa_class,
         }
     
     def enable_autosubmit(self):
