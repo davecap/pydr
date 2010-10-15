@@ -118,7 +118,6 @@ def main():
             # first look for the file...
             if not os.path.exists(manager.hostfile):
                 log.error('No hostfile exists! will retry...')
-                time.sleep(5)
                 continue
             else:
                 # hostfile is found, read it and get the server's Pyro URI
