@@ -27,7 +27,7 @@ from Pyro.errors import ProtocolError
 log = logging.getLogger("pydr")
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 ch = logging.StreamHandler()
-log.setLevel(logging.INFO)
+log.setLevel(logging.WARNING)
 ch.setFormatter(formatter)
 log.addHandler(ch)
 
@@ -68,6 +68,9 @@ def main():
     if config['debug']:
         log.setLevel(logging.DEBUG)
         log.debug('Debug mode is on!')
+    if config['verbose']:
+        log.setLevel(logging.INFO)
+        log.debug('Verbose mode is on!')
     
     Pyro.core.initServer()
     daemon = Pyro.core.Daemon(port=int(config['manager']['port']))
@@ -686,8 +689,10 @@ python ${pydr_path} -j $PBS_JOBID
             # this will raise an exception if it isnt an integer
             int(split_output[0])
         except Exception, ex:
-            log.error('No job_id found in qsub output: %s' % out)
-            log.debug('Exception: %s' % str(ex))
+            log.error('Error running qsub!')
+            log.error(' Exception: %s' % str(ex))
+            log.error(' stdout: %s' % out)
+            log.error(' stderr: %s' % err)
             log.debug('Job submit stdout: %s' % out)
             log.debug('Job submit stderr: %s' % err)
             self.id = None
@@ -782,8 +787,11 @@ PYDR_CONFIG_SPEC = """# PyDR Config File
 
 # set a title for this setup
 title = string(default='My DR')
-# enable log debug mode?
+# enable log debug mode (log all messages)?
 debug = boolean(default=False)
+# enable log verbose mode (logging INFO messages)?
+# verbose mode will log less than debug but a lot more than normal
+verbose = boolean(default=False)
 
 # Paths to system programs
 [system]
