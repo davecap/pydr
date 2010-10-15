@@ -433,11 +433,11 @@ class Manager(Pyro.core.SynchronizedObjBase):
     
     def get_replica(self, job_id, pbs_nodefile=''):
         """ Get the next replica for a job to run by calling this """
-        log.debug('Job %s wants a replica' % str(job_id))        
-        job = self.find_job_by_id(job_id)
         if not self.active:
             slog.error('Server is not active... will not send the client (%s) anything' % job_id)
-        elif job is None:
+        log.debug('Job %s wants a replica' % str(job_id))        
+        job = self.find_job_by_id(job_id)
+        if job is None:
             slog.error('Client with invalid job_id (%s) pinged the server!' % (job_id))
         elif not job.has_seconds_remaining(float(self.config['job']['replica_walltime'])):
             # see if the remaining walltime < replica walltime (make sure a replica run can finish in time)
