@@ -20,21 +20,14 @@ from threading import Thread
 import Pyro.core
 from Pyro.errors import ProtocolError
 
-# tables for replica log
-# import tables
-
-# setup logging
-log = logging.getLogger("pydr")
-formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-ch = logging.StreamHandler()
-log.setLevel(logging.WARNING)
-ch.setFormatter(formatter)
-log.addHandler(ch)
+# global logs
+log = None
+slog = None
 
 # this is the server listener
 # it runs in a separate thread and contains a running server/manager started on command
 def server_listener(daemon, manager, start=False, reset=False):
-    log.info('Starting server listener...')
+    log.debug('Starting server listener...')
     try:
         if start:
             manager.start()
@@ -46,10 +39,13 @@ def server_listener(daemon, manager, start=False, reset=False):
             manager.maintain()
             daemon.handleRequests(20.0)
     finally:
-        log.info('Server shutting down...')
+        log.debug('Server shutting down...')
         daemon.shutdown(True)
 
-def main():    
+def main():
+    global log
+    global slog
+    
     usage = """
         usage: %prog [options]
     """
@@ -60,24 +56,48 @@ def main():
     parser.add_option("-s", "--start", dest="start_server", action="store_true", default=False, help="Start the server [default: %default]")    
     parser.add_option("-n", "--pbs-nodefile", dest="pbs_nodefile", default=None, help="Contents of $PBS_NODEFILE")
     parser.add_option("--reset", dest="reset", default=False, action="store_true", help="Restart all replicas and jobs by resetting their status")
+    parser.add_option("-v", "--verbose", dest="verbose", action="store_true", default=False, help="Log to the console [default: %default]")    
     
     (options, args) = parser.parse_args()
     
     config = setup_config(options.config_file, create=True)
     
+    # set up logging for client and server
+    log = logging.getLogger("%s" % options.job_id)
+    slog = logging.getLogger("manager %s" % options.job_id)
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s')
+    
+    # output log entries to console
+    if options.verbose:
+        log_sh = logging.StreamHandler()
+        log_sh.setFormatter(formatter)
+        log.addHandler(log_sh)
+        slog_sh = logging.StreamHandler()
+        slog_sh.setFormatter(formatter)
+        slog.addHandler(slog_sh)
+        
+    # always output log entries to log files
+    log_fh = logging.FileHandler(config['job']['logfile'])
+    log_fh.setFormatter(formatter)
+    log.addHandler(log_fh)
+    slog_fh = logging.FileHandler(config['manager']['logfile'], delay=True)
+    slog_fh.setFormatter(formatter)
+    slog.addHandler(slog_fh)
+    
     if config['debug']:
         log.setLevel(logging.DEBUG)
+        slog.setLevel(logging.DEBUG)
         log.debug('Debug mode is on!')
-    if config['verbose']:
+    else:
         log.setLevel(logging.INFO)
-        log.debug('Verbose mode is on!')
+        slog.setLevel(logging.INFO)
     
     Pyro.core.initServer()
     daemon = Pyro.core.Daemon(port=int(config['manager']['port']))
     manager = Manager(config, daemon, options.job_id)
     manager_uri = daemon.connect(manager, 'manager')
-    log.info('The daemon is running at: %s:%s' % (daemon.hostname, daemon.port))
-    log.info('The manager\'s uri is: %s' % manager_uri)
+    log.info('Daemon: %s:%s' % (daemon.hostname, daemon.port))
+    log.info('Manager URI: %s' % manager_uri)
     
     thread = Thread(target=server_listener, args=(daemon, manager, options.start_server, options.reset))
     thread.start()
@@ -128,7 +148,7 @@ def main():
                     # the actual replica variable contains a 2-tuple
                     (command, env) = replica
                     # get the replica by its ID
-                    log.info('Ending run for replica %s' % str(env['id']))
+                    log.debug('Ending run for replica %s' % str(env['id']))
                     try:
                         server.end_replica(replica_id=env['id'], job_id=options.job_id, return_code=run_process.poll())
                     except ProtocolError:
@@ -147,8 +167,8 @@ def main():
                 if replica is not None:
                     (command, env) = replica
                     # res contains the replica environment variables
-                    log.info('Client running replica %s' % env['id'])
-                    log.info('Environment variables: %s' % env)
+                    log.debug('Client running replica %s' % env['id'])
+                    log.debug('Environment variables: %s' % env)
                     # run the replica
                     run_process = subprocess.Popen(command, env=env)
                     # now just wait until the job is done
@@ -171,6 +191,7 @@ def main():
         server.end_job(options.job_id)
     except ProtocolError:
         log.error('Could not connect to server to notify it of job completion')
+    logging.shutdown()
 
 #
 # Start of PyDR Library
@@ -208,7 +229,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
         # tell the server to shutdown on maintenance if this is true (THIS IS A HACK)
         self.shutdown = False
         # load the replica selection algorithm class
-        log.info('Loading replica selection algorithm class %s...' % self.config['manager']['replica_selection_class'])
+        log.debug('Loading replica selection algorithm class %s...' % self.config['manager']['replica_selection_class'])
         self.rsa_class = globals()[self.config['manager']['replica_selection_class']]()
     
     def _seconds_since_start(self):
@@ -226,27 +247,27 @@ class Manager(Pyro.core.SynchronizedObjBase):
 
     def start(self):
         """ Start the server """
-        log.info('Starting the server!')
+        slog.info('Starting the server!')
         self.active = True
         f = open(self.hostfile, 'w')
-        log.debug('Writing hostfile...')
+        slog.debug('Writing hostfile...')
         f.write(self.uri)
         f.close()
 
         # load from snapshot if one is found
         if os.path.exists(self.snapshot_path):
-            log.info('Loading snapshot from %s' % (self.snapshot_path))
+            slog.info('Loading snapshot from %s' % (self.snapshot_path))
             self.snapshot = Snapshot(self.snapshot_path)
             self.jobs = self.snapshot.load_jobs(self)
             self.replicas = self.snapshot.load_replicas(self)
             self.update_replicas_from_config()
-            log.info('Snapshot loaded successfuly')
+            slog.info('Snapshot loaded successfuly')
         else:
             # initialize a new snapshot
             self.snapshot = Snapshot(self.snapshot_path)
             # loop through replicas in the config file
             for r_id, r_properties in self.config['replicas'].items():
-                log.info('Adding replica: %s -> %s' % (r_id, r_properties))
+                slog.info('Adding replica: %s -> %s' % (r_id, r_properties))
                 # create new Replica objects             
                 r = Replica(manager=self, id=r_id, properties=r_properties)
                 self.replicas[r.id] = r
@@ -263,7 +284,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
         # look for any timed-out replicas
         for r_id, r in self.replicas.items():
             if r.status == Replica.RUNNING and datetime.datetime.now() >= r.timeout_time:
-                log.error('Replica %s timed-out, ending the run' % r_id)
+                slog.error('Replica %s timed-out, ending the run' % r_id)
                 r.stop(return_code=1)
 
         # run autosubmit and snapshot
@@ -292,7 +313,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
             jobs_to_submit.append(Job(self))
         
         if len(jobs_to_submit) > 0:
-            log.info('Will autosubmit %d new jobs...' % len(jobs_to_submit))
+            slog.info('Will autosubmit %d new jobs...' % len(jobs_to_submit))
         
         # submit all the jobs that we need to submit
         # be careful though, disable autosubmit on qsub failure
@@ -300,7 +321,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
             if j.submit():
                 self.jobs.append(j)
             else:
-                log.error('Job submission failed, disabling autosubmit!')
+                slog.error('Job submission failed, disabling autosubmit!')
                 self.config['manager']['autosubmit'] = False
                 return False
             time.sleep(1) # sleep for 1 second between submits
@@ -312,7 +333,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
             if str(j.id) == str(job_id):
                 return j
         if create:
-            log.error('Job with id %s not found, creating new Job' % job_id)                
+            slog.error('Job with id %s not found, creating new Job' % job_id)                
             job = Job(self)
             job.id = job_id
             self.jobs.append(job)
@@ -323,24 +344,36 @@ class Manager(Pyro.core.SynchronizedObjBase):
     def update_replicas_from_config(self):
         """ Loop through the replicas in the config and create or update them in the manager """
         for r_id, r_properties in self.config['replicas'].items():
-            log.info('Updating replica: %s' % (r_id))
+            slog.info('Updating replica: %s' % (r_id))
             if r_id not in self.replicas.keys():
-                log.info('Replica %s found in config but not in snapshot, adding the replica...' % str(r_id))
+                slog.info('Replica %s found in config but not in snapshot, adding the replica...' % str(r_id))
                 r = Replica(manager=self, id=r_id, properties=r_properties)
                 self.replicas[r.id] = r
             else:
                 self.replicas[r_id].properties.update(r_properties)
     
     def force_reset(self):
-        log.info("Setting all RUNNING replicas to READY...")
+        slog.info("Setting all RUNNING replicas to READY...")
         for r in self.replicas.values():
             r.stop()
-        log.info("Clearing job stack...")
+        slog.info("Clearing job stack...")
         self.jobs = []
     
     # TODO: rename these functions!
+    def get_manager_properties(self):
+        return {    'job_id': self.job_id,
+                    'uri': self.uri,
+                    'project_path': self.project_path,
+                    'start_time': self.start_time,
+                    'last_snapshot_time': self.last_snapshot_time,
+                    'last_autosubmit_time': self.last_autosubmit_time,
+                    'snapshot_path': self.snapshot_path,
+                    'hostfile': self.hostfile,
+                    'rsa_class': self.rsa_class,
+        }
+    
     def enable_autosubmit(self):
-        log.info("Enabling autosubmit!")
+        slog.info("Enabling autosubmit!")
         self.config['manager']['autosubmit'] = True
     
     def get_all_replicas(self):
@@ -363,11 +396,11 @@ class Manager(Pyro.core.SynchronizedObjBase):
     def set_replica_status(self, replica_id, status):
         try:
             r = self.replicas[replica_id]
-            log.info('Changing replica %s status from %s to %s' % (str(replica_id), r.status, status))
+            slog.info('Changing replica %s status from %s to %s' % (str(replica_id), r.status, status))
             r.status = status
             return True
         except Exception, ex:
-            log.error('Could not change replica %s status: %s' % (str(replica_id), str(ex)))
+            slog.error('Could not change replica %s status: %s' % (str(replica_id), str(ex)))
             return False
 
     #
@@ -376,7 +409,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
     
     def connect(self, job_id, listener_uri):
         """ Clients make contact with the server by calling this """
-        log.debug('Job %s connected.' % str(job_id))        
+        slog.debug('Job %s connected.' % str(job_id))        
         job = self.find_job_by_id(job_id, create=True)
         # if this is the first time
         if not job.started:
@@ -389,68 +422,68 @@ class Manager(Pyro.core.SynchronizedObjBase):
                 # save a snapshot first
                 self.snapshot.save(self)
                 # connect to the listener on the client and start
-                log.info('Starting manager on job %s (%s)...' % (str(job_id), listener_uri))
+                slog.info('Starting manager on job %s (%s)...' % (str(job_id), listener_uri))
                 server_listener = Pyro.core.getProxyForURI(listener_uri)
                 server_listener._setTimeout(2)
                 try:
                     if server_listener.start():
-                        log.info('Sucessfully transferred manager to job %s' % str(job_id))
+                        slog.info('Sucessfully transferred manager to job %s' % str(job_id))
                         self.active = False
                 except Exception, ex:
-                    log.debug('Could not connect to client (%s)' % str(ex))
+                    slog.debug('Could not connect to client (%s)' % str(ex))
     
     def get_replica(self, job_id, pbs_nodefile=''):
         """ Get the next replica for a job to run by calling this """
         log.debug('Job %s wants a replica' % str(job_id))        
         job = self.find_job_by_id(job_id)
         if not self.active:
-            log.error('Server is not active... will not send the client (%s) anything' % job_id)
+            slog.error('Server is not active... will not send the client (%s) anything' % job_id)
         elif job is None:
-            log.error('Client with invalid job_id (%s) pinged the server!' % (job_id))
+            slog.error('Client with invalid job_id (%s) pinged the server!' % (job_id))
         elif not job.has_seconds_remaining(float(self.config['job']['replica_walltime'])):
             # see if the remaining walltime < replica walltime (make sure a replica run can finish in time)
             if job_id != self.job_id:
-                log.warning("Client job (%s) doesn't have enough time left to run a replica, will not send one." % job_id)
+                slog.warning("Client job (%s) doesn't have enough time left to run a replica, will not send one." % job_id)
         else:
             # Replica selection algorithm
             r = self.rsa_class.select(self.replicas)
             if r is not None:
-                log.info('Sending replica %s to client job %s' % (r.id, job.id))
+                slog.info('Sending replica %s to client job %s' % (r.id, job.id))
                 job.replica_id = r.id
                 r.start(job.id)
                 return (r.command(), r.environment_variables(PBS_JOBID=job.id, PBS_NODEFILE=pbs_nodefile))
             else:
-                log.debug('No replicas ready to run')
+                slog.debug('No replicas ready to run')
         return None
     
     def end_replica(self, replica_id, job_id, return_code):
         """ Clients call this to end a replica that finished running """
-        log.info('Job %s is ending replica %s' % (str(job_id), str(replica_id)))        
+        slog.info('Job %s is ending replica %s' % (str(job_id), str(replica_id)))        
         job = self.find_job_by_id(job_id)
         if job is None:
-            log.error('Job %s is invalid!' % str(job_id))
+            slog.error('Job %s is invalid!' % str(job_id))
         else:
             try:
                 job.replica_id = None
                 self.replicas[replica_id].stop(return_code)
                 return True
             except Exception, ex:
-                log.error('Exception when stopping replica (%s): %s' % (str(replica_id), str(ex)))
+                slog.error('Exception when stopping replica (%s): %s' % (str(replica_id), str(ex)))
         return False
         
     def end_job(self, job_id):
         """ Clients call this to end a job that finished running """
-        log.info('Job %s is ending' % str(job_id))        
+        slog.info('Job %s is ending' % str(job_id))        
         job = self.find_job_by_id(job_id)
         if job is None:
-            log.error('Job %s is invalid!' % str(job_id))
+            slog.error('Job %s is invalid!' % str(job_id))
         else:
             # if a job ends while a replica is running on it... stop the replica
             if job.replica_id is not None:
                 r = self.replicas[job.replica_id]
-                log.error('Job ending while a replica %s is in state %s' % (str(r.id), r.status))
+                slog.error('Job ending while a replica %s is in state %s' % (str(r.id), r.status))
                 if r.status == Replica.RUNNING:
-                    log.error('Ending and stopping replica %s!' % str(r.id))
+                    slog.error('Ending and stopping replica %s!' % str(r.id))
                     r.stop(1)
                 job.replica_id = None
             job.stop()
@@ -493,11 +526,11 @@ class Snapshot(object):
             j_copy = copy.copy(j)
             j_copy.manager = None
             self.jobs.append(j_copy)
-        log.debug('Saving snapshot to %s...' % self.path)
+        slog.debug('Saving snapshot to %s...' % self.path)
         f = open(self.path, 'w')
         pickle.dump(self, f)
         f.close()
-        log.debug('Done saving snapshot')
+        slog.debug('Done saving snapshot')
 
 # Subclass Replica to handle different simulation packages and systems?
 class Replica(Pyro.core.ObjBase):
@@ -789,9 +822,6 @@ PYDR_CONFIG_SPEC = """# PyDR Config File
 title = string(default='My DR')
 # enable log debug mode (log all messages)?
 debug = boolean(default=False)
-# enable log verbose mode (logging INFO messages)?
-# verbose mode will log less than debug but a lot more than normal
-verbose = boolean(default=False)
 
 # Paths to system programs
 [system]
@@ -806,6 +836,8 @@ verbose = boolean(default=False)
     port = integer(min=1024, max=65534, default=7766)
     # Name of the file containing the Pyro address of the manager
     hostfile = string(default='hostfile')
+    # Relative path to the manager logfile
+    logfile = string(default='manager.log') 
     # Automatically submit (qsub) jobs as required when the manager is launched
     autosubmit = boolean(default=True)
     # submit host, ssh to this host when running qsub to submit jobs
@@ -824,6 +856,8 @@ verbose = boolean(default=False)
 # Job-specific configuration
 [job]
     name = string(default='myjob')
+    # Relative path to the logfile
+    logfile = string(default='client.log')
     # PBS submit script options
     # processors per node
     ppn = integer(min=1, max=64, default=1)
@@ -878,7 +912,6 @@ def setup_config(path='config.ini', create=False):
 
     # create config file with defaults if necessary
     if create and not os.path.exists(path):
-        log.info('Creating new config file: %s' % path)
         config.validate(validator, copy=True)
         config.filename = path
         config.write()

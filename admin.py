@@ -49,6 +49,11 @@ def main():
     
     server = Pyro.core.getProxyForURI(server_uri)
     server._setTimeout(1)
+
+    props = server.get_manager_properties()
+    print "Connected to server"
+    for k,v in props.items():
+        print "%s %s" % (k, v)
     
     replicas = server.get_all_replicas()
     jobs = server.get_all_jobs()
