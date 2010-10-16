@@ -683,7 +683,7 @@ python ${pydr_path} -j $PBS_JOBID
     
     def submit(self):
         """ Submit a job using qsub """        
-        log.debug('Submitting job...')
+        slog.debug('Submitting job...')
         self.submit_time = datetime.datetime.now()
         # note: client will send the job_id back to server to associate a replica with a job
         qsub_path = self.manager.config['system']['qsub']
@@ -707,7 +707,7 @@ python ${pydr_path} -j $PBS_JOBID
         else:
             submit_command = ' '.join([qsub_path, f_abspath])
         
-        log.debug('Submitting: "%s"' % submit_command)
+        slog.debug('Submitting: "%s"' % submit_command)
         process = subprocess.Popen(submit_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         returncode = process.returncode
         (out, err) = process.communicate()
@@ -720,21 +720,21 @@ python ${pydr_path} -j $PBS_JOBID
             # this will raise an exception if it isnt an integer
             int(split_output[0])
         except Exception, ex:
-            log.error('Error running qsub!')
-            log.error(' Exception: %s' % str(ex))
-            log.error(' stdout: %s' % out)
-            log.error(' stderr: %s' % err)
-            log.debug('Job submit stdout: %s' % out)
-            log.debug('Job submit stderr: %s' % err)
+            slog.error('Error running qsub!')
+            slog.error(' Exception: %s' % str(ex))
+            slog.error(' stdout: %s' % out)
+            slog.error(' stderr: %s' % err)
+            slog.debug('Job submit stdout: %s' % out)
+            slog.debug('Job submit stderr: %s' % err)
             self.id = None
             return False
         else:
-            log.info('Job submitted with ID %s' % self.id)
+            slog.info('Job submitted with ID %s' % self.id)
             return True
 
     def get_job_properties(self):
         if not self.id:
-            log.error('Cannot get job properties with unknown job id')
+            slog.error('Cannot get job properties with unknown job id')
             return None
         
         process = subprocess.Popen('checkjob --format=XML %s' % (self.id,), shell=False, stdout=PIPE, stderr=PIPE)
@@ -774,10 +774,10 @@ python ${pydr_path} -j $PBS_JOBID
 
     def cancel_job(self):
         if not self.id:
-            log.error('Cannot cancel job with unknown job id')
+            slog.error('Cannot cancel job with unknown job id')
             return
         else:
-            log.info('Cancelling job %s' % self.id)
+            slog.info('Cancelling job %s' % self.id)
             process = subprocess.Popen('qdel %s' % (self.id,), shell=False, stdout=PIPE, stderr=PIPE)
             (out,err) = process.communicate()
 
