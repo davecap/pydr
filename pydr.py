@@ -408,51 +408,55 @@ class Manager(Pyro.core.SynchronizedObjBase):
     
     def connect(self, job_id, listener_uri):
         """ Clients make contact with the server by calling this """
-        slog.debug('Job %s connected.' % str(job_id))        
-        job = self.find_job_by_id(job_id, create=True)
-        # if this is the first time
-        if not job.started:
-            job.start()
-            job.uri = listener_uri
-            
-            # start the server on this client if it has been more than 59 minutes since we last transferred
-            # this is guaranteed to be a new client since the job has just started
-            if (datetime.datetime.now()-self.start_time) > datetime.timedelta(minutes=59):
-                # save a snapshot first
-                self.snapshot.save(self)
-                # connect to the listener on the client and start
-                slog.info('Starting manager on job %s (%s)...' % (str(job_id), listener_uri))
-                server_listener = Pyro.core.getProxyForURI(listener_uri)
-                server_listener._setTimeout(2)
-                try:
-                    if server_listener.start():
-                        slog.info('Sucessfully transferred manager to job %s' % str(job_id))
-                        self.active = False
-                except Exception, ex:
-                    slog.debug('Could not connect to client (%s)' % str(ex))
+        if not self.active:
+            slog.error('Server is not active... ignoring client (%s) connect' % job_id)
+        else:
+            slog.debug('Job %s connected.' % str(job_id))        
+            job = self.find_job_by_id(job_id, create=True)
+            # if this is the first time
+            if not job.started:
+                job.start()
+                job.uri = listener_uri
+                
+                # start the server on this client if it has been more than 59 minutes since we last transferred
+                # this is guaranteed to be a new client since the job has just started
+                if (datetime.datetime.now()-self.start_time) > datetime.timedelta(minutes=59):
+                    # save a snapshot first
+                    self.snapshot.save(self)
+                    # connect to the listener on the client and start
+                    slog.info('Starting manager on job %s (%s)...' % (str(job_id), listener_uri))
+                    server_listener = Pyro.core.getProxyForURI(listener_uri)
+                    server_listener._setTimeout(2)
+                    try:
+                        if server_listener.start():
+                            slog.info('Sucessfully transferred manager to job %s' % str(job_id))
+                            self.active = False
+                    except Exception, ex:
+                        slog.debug('Could not connect to client (%s)' % str(ex))
     
     def get_replica(self, job_id, pbs_nodefile=''):
         """ Get the next replica for a job to run by calling this """
         if not self.active:
             slog.error('Server is not active... will not send the client (%s) anything' % job_id)
-        log.debug('Job %s wants a replica' % str(job_id))        
-        job = self.find_job_by_id(job_id)
-        if job is None:
-            slog.error('Client with invalid job_id (%s) pinged the server!' % (job_id))
-        elif not job.has_seconds_remaining(float(self.config['job']['replica_walltime'])):
-            # see if the remaining walltime < replica walltime (make sure a replica run can finish in time)
-            if job_id != self.job_id:
-                slog.warning("Client job (%s) doesn't have enough time left to run a replica, will not send one." % job_id)
         else:
-            # Replica selection algorithm
-            r = self.rsa_class.select(self.replicas)
-            if r is not None:
-                slog.info('Sending replica %s to client job %s' % (r.id, job.id))
-                job.replica_id = r.id
-                r.start(job.id)
-                return (r.command(), r.environment_variables(PBS_JOBID=job.id, PBS_NODEFILE=pbs_nodefile))
+            log.debug('Job %s wants a replica' % str(job_id))        
+            job = self.find_job_by_id(job_id)
+            if job is None:
+                slog.error('Client with invalid job_id (%s) pinged the server!' % (job_id))
+            elif not job.has_seconds_remaining(float(self.config['job']['replica_walltime'])):
+                # see if the remaining walltime < replica walltime (make sure a replica run can finish in time)
+                if job_id != self.job_id:
+                    slog.warning("Client job (%s) doesn't have enough time left to run a replica, will not send one." % job_id)
             else:
-                slog.debug('No replicas ready to run')
+                # Replica selection algorithm
+                r = self.rsa_class.select(self.replicas)
+                if r is not None:
+                    slog.info('Sending replica %s to client job %s' % (r.id, job.id))
+                    job.replica_id = r.id
+                    r.start(job.id)
+                    return (r.command(), r.environment_variables(PBS_JOBID=job.id, PBS_NODEFILE=pbs_nodefile))
+                else:
+                    slog.debug('No replicas ready to run')
         return None
     
     def end_replica(self, replica_id, job_id, return_code):
