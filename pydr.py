@@ -928,8 +928,8 @@ class ParseShowq(object):
         if user is None:
             import getpass
             user = getpass.getuser()
-        
-        self.showq_command = ' '.join(['showq','--format=xml','-w user=%s' % user])
+        # TODO: put showq path in config
+        self.showq_command = ' '.join(['/usr/local/bin/showq','--format=xml','-w user=%s' % user])
         self.p = xml.parsers.expat.ParserCreate()
         self.p.StartElementHandler = self.start_element
         self.p.EndElementHandler = self.end_element
@@ -940,7 +940,10 @@ class ParseShowq(object):
         process = subprocess.Popen(self.showq_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         returncode = process.returncode
         (out, err) = process.communicate()
-        self.p.Parse(out, 1)
+        try:
+            self.p.Parse(out, 1)
+        except:
+            raise Exception('Error parsing showq output: %s . %s' % (out, err))
         return self.jobs
 
     def start_element(self, name, attrs):
