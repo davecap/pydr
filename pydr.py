@@ -410,8 +410,8 @@ class Manager(Pyro.core.SynchronizedObjBase):
             showq = ParseShowq()
             jobs = showq.run()
             running_jobs = dict([ (j['DRMJID'],True) for j in jobs if j['State'] == 'Running'])
-        except:
-            slog.error('Error running showq!')
+        except Exception, ex:
+            slog.error('Error running showq: %s' % str(ex))
             return False
         else:
             for j in self.jobs:
