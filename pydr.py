@@ -12,7 +12,7 @@ import pickle
 import copy
 from string import Template
 
-from xml.dom.minidom import parseString
+import xml.parsers.expat
 from configobj import ConfigObj, flatten_errors
 from validate import Validator
 from threading import Thread
@@ -402,6 +402,24 @@ class Manager(Pyro.core.SynchronizedObjBase):
             slog.error('Could not change replica %s status: %s' % (str(replica_id), str(ex)))
             return False
 
+    def reset_stopped_jobs(self):
+        # get the status of all running jobs
+        # if we have jobs that are running but not in this list then end them!
+        slog.info('Resetting stopped jobs... looking in showq status')
+        try:
+            showq = ParseShowq()
+            jobs = showq.run()
+            running_jobs = dict([ (j['DRMJID'],True) for j in jobs if j['State'] == 'Running'])
+        except:
+            slog.error('Error running showq!')
+            return False
+        else:
+            for j in self.jobs:
+                if not j.completed() and j.id not in running_jobs:
+                    slog.info('Stopping job %s...' % j.id)
+                    j.stop()
+        return True
+
     #
     # Client calls to Manager
     #
@@ -737,28 +755,6 @@ python ${pydr_path} -j $PBS_JOBID
             slog.info('Job submitted with ID %s' % self.id)
             return True
 
-    def get_job_properties(self):
-        if not self.id:
-            slog.error('Cannot get job properties with unknown job id')
-            return None
-        
-        process = subprocess.Popen('checkjob --format=XML %s' % (self.id,), shell=False, stdout=PIPE, stderr=PIPE)
-        (out,err) = process.communicate()
-        if not out:
-            return None
-
-        try:
-            dom = parseString(out)
-            jobs = dom.getElementsByTagName('job')
-            job = jobs[0]
-            job_props = {}
-            for prop in job.attributes.keys():
-                job_props[prop]=job.attributes[prop].nodeValue
-        except:
-            return None
-        else:
-            return job_props
-
     def completed(self):
         """ See if the job is completed or not """
         if not self.started:
@@ -768,23 +764,6 @@ python ${pydr_path} -j $PBS_JOBID
                 return datetime.datetime.now() >= self.stop_time
             except:
                 return True
-        
-        # TODO: look at actual job status
-        #   this could be too slow, so for now just look at predicted times
-        #props = self.get_job_properties(self.id)
-        #if props and props['State'] is not 'Completed':
-        #   return False
-        #else:
-        #   return True
-
-    def cancel_job(self):
-        if not self.id:
-            slog.error('Cannot cancel job with unknown job id')
-            return
-        else:
-            slog.info('Cancelling job %s' % self.id)
-            process = subprocess.Popen('qdel %s' % (self.id,), shell=False, stdout=PIPE, stderr=PIPE)
-            (out,err) = process.communicate()
 
 #
 # Replica Selection Algorithms
@@ -943,6 +922,35 @@ def setup_config(path='config.ini', create=False):
                 print section_string, ' = ', error
             raise Exception('Errors in config file')
     return config
-            
+
+class ParseShowq(object):
+    def __init__(self, user=None):
+        if user is None:
+            import getpass
+            user = getpass.getuser()
+        
+        self.showq_command = ' '.join(['showq','--format=xml','-w user=%s' % user])
+        self.p = xml.parsers.expat.ParserCreate()
+        self.p.StartElementHandler = self.start_element
+        self.p.EndElementHandler = self.end_element
+        self.p.CharacterDataHandler = self.char_data
+
+    def run(self):
+        self.jobs = []
+        process = subprocess.Popen(self.showq_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        returncode = process.returncode
+        (out, err) = process.communicate()
+        self.p.Parse(out, 1)
+        return self.jobs
+
+    def start_element(self, name, attrs):
+        if name == 'job':
+            self.jobs.append(attrs)
+
+    def end_element(self, name):
+        pass
+    def char_data(self, data):
+        pass    
+      
 if __name__=='__main__':
     main()
