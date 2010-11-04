@@ -407,15 +407,15 @@ class Manager(Pyro.core.SynchronizedObjBase):
         # if we have jobs that are running but not in this list then end them!
         slog.info('Resetting stopped jobs... looking in showq status')
         try:
-            showq = ParseShowq()
-            jobs = showq.run()
-            running_jobs = dict([ (j['DRMJID'],True) for j in jobs if j['State'] == 'Running'])
+            showq = ParseQstat()
+            qstat_jobs = showq.run()
         except Exception, ex:
             slog.error('Error running showq: %s' % str(ex))
             return False
         else:
-            for j in self.jobs:
-                if not j.completed() and j.id not in running_jobs:
+            running_jobs = [ j for j in self.jobs if not j.completed() ]
+            for j in running_jobs:
+                if j.id not in qstat_jobs or qstat_jobs[j.id] != 'R':
                     slog.info('Stopping job %s...' % j.id)
                     j.stop()
         return True
@@ -923,13 +923,10 @@ def setup_config(path='config.ini', create=False):
             raise Exception('Errors in config file')
     return config
 
-class ParseShowq(object):
-    def __init__(self, user=None):
-        if user is None:
-            import getpass
-            user = getpass.getuser()
-        # TODO: put showq path in config
-        self.showq_command = ' '.join(['/usr/local/bin/showq','--format=xml','-w user=%s' % user])
+class ParseQstat(object):
+    def __init__(self):
+        # TODO: put qstat path in config
+        self.qstat = 'qstat -x'
         self.p = xml.parsers.expat.ParserCreate()
         self.p.StartElementHandler = self.start_element
         self.p.EndElementHandler = self.end_element
@@ -937,23 +934,31 @@ class ParseShowq(object):
 
     def run(self):
         self.jobs = []
-        process = subprocess.Popen(self.showq_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.job_states = []
+        self.add_job = False
+        self.add_job_state = True
+        process = subprocess.Popen(self.qstat, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         returncode = process.returncode
         (out, err) = process.communicate()
-        try:
-            self.p.Parse(out, 1)
-        except:
-            raise Exception('Error parsing showq output: %s . %s' % (out, err))
-        return self.jobs
+        self.p.Parse(out, 1)
+        return dict(zip(self.jobs,self.job_states))
 
     def start_element(self, name, attrs):
-        if name == 'job':
-            self.jobs.append(attrs)
+        if name == 'Job_Id':
+            self.add_job = True
+        elif name == 'job_state':
+            self.add_job_state = True
 
     def end_element(self, name):
         pass
+
     def char_data(self, data):
-        pass    
+        if self.add_job:
+            self.jobs.append(data)
+            self.add_job = False
+        elif self.add_job_state:
+            self.job_states.append(data)
+            self.add_job_state = False
       
 if __name__=='__main__':
     main()
