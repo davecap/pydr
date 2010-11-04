@@ -402,7 +402,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
             slog.error('Could not change replica %s status: %s' % (str(replica_id), str(ex)))
             return False
 
-    def reset_stopped_jobs(self):
+    def reset_invalid_jobs(self):
         # get the status of all running jobs
         # if we have jobs that are running but not in this list then end them!
         slog.info('Resetting stopped jobs... looking in showq status')
@@ -412,7 +412,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
         except Exception, ex:
             slog.error('Error running showq: %s' % str(ex))
             return False
-        else:
+        else:            
             running_jobs = [ j for j in self.jobs if not j.completed() ]
             for j in running_jobs:
                 if j.id not in qstat_jobs or qstat_jobs[j.id] != 'R':
@@ -658,6 +658,7 @@ python ${pydr_path} -j $PBS_JOBID
         self.started = True
         
     def stop(self):
+        self.started = True
         self.stop_time = datetime.datetime.now()
         
     def make_submit_script(self, options={}):

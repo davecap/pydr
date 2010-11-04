@@ -26,7 +26,7 @@ def main():
     # set replica stopped
     parser.add_option("-s", dest="set_replica_stopped", default=None, help="Set a replica to STOPPED [default: %default]")
     # reset stopped jobs
-    parser.add_option("--reset-jobs", dest="reset_stopped_jobs", default=False, action="store_true", help="Reset stopped jobs [default: %default]")
+    parser.add_option("--reset-jobs", dest="reset_jobs", default=False, action="store_true", help="Reset stopped jobs [default: %default]")
     # enable autosubmit
     parser.add_option("-a", dest="enable_autosubmit", default=False, action="store_true", help="Enable autosubmit [default: %default]")    
     # force reset
@@ -76,9 +76,9 @@ def main():
                 if not server.set_replica_status(replica_id=r_id, status=Replica.READY):
                     print "Could not change the replica status!"
     
-    if options.reset_stopped_jobs:
+    if options.reset_jobs:
         print "Resetting stopped jobs..."
-        if not server.reset_stopped_jobs():
+        if not server.reset_invalid_jobs():
             print "Could not reset stopped jobs!"
     
     if options.show_all_replicas:
