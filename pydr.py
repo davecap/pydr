@@ -253,24 +253,14 @@ class Manager(Pyro.core.SynchronizedObjBase):
         f.write(self.uri)
         f.close()
 
+        self.snapshot = Snapshot(self.snapshot_path)
         # load from snapshot if one is found
         if os.path.exists(self.snapshot_path):
             slog.info('Loading snapshot from %s' % (self.snapshot_path))
-            self.snapshot = Snapshot(self.snapshot_path)
             self.jobs = self.snapshot.load_jobs(self)
             self.replicas = self.snapshot.load_replicas(self)
-            self.update_replicas_from_config()
             slog.info('Snapshot loaded successfuly')
-        else:
-            # initialize a new snapshot
-            self.snapshot = Snapshot(self.snapshot_path)
-            # loop through replicas in the config file
-            for r_id, r_properties in self.config['replicas'].items():
-                slog.info('Adding replica: %s -> %s' % (r_id, r_properties))
-                # create new Replica objects             
-                r = Replica(manager=self, id=r_id, properties=r_properties)
-                self.replicas[r.id] = r
-
+        self.update_replicas_from_config()
         if not len(self.replicas.items()):
             raise Exception('No replicas found in config file... exiting!')
         return True
@@ -344,12 +334,12 @@ class Manager(Pyro.core.SynchronizedObjBase):
         """ Loop through the replicas in the config and create or update them in the manager """
         for r_id, r_properties in self.config['replicas'].items():
             slog.info('Updating replica: %s' % (r_id))
-            if r_id not in self.replicas.keys():
+            if r_id not in self.replicas:
                 slog.info('Replica %s found in config but not in snapshot, adding the replica...' % str(r_id))
                 r = Replica(manager=self, id=r_id, properties=r_properties)
                 self.replicas[r.id] = r
             else:
-                self.replicas[r_id].properties.update(r_properties)
+                self.replicas[r_id].properties = r_properties
     
     def force_reset(self):
         slog.info("Setting all RUNNING replicas to READY...")
