@@ -744,6 +744,7 @@ python ${pydr_path} -j $PBS_JOBID
             return False
         else:
             slog.info('Job submitted with ID %s' % self.id)
+            os.remove(f_abspath)
             return True
 
     def completed(self):
