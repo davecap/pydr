@@ -51,8 +51,7 @@ def get_column(h5_file, path):
     tbl = h5f.getNode(h5_table)
     field_data = list(tbl.read(field=h5_field))
     h5f.close()
-    data = [ { 'x':float(x), 'y':float(y) } for x,y in enumerate(field_data) ]
-    return data
+    return field_data
 
 def get_paths(h5_file):
     paths = []
@@ -84,7 +83,15 @@ def index(replica=None):
         if not path:
             return render_template_string(_REPLICA_TEMPLATE, replica=replica, paths=get_paths(os.path.join(_project_path, replica, _h5_filename)))
         else:
-            return render_template_string(_PLOT_TEMPLATE, data=json.dumps(get_column(os.path.join(_project_path, replica, _h5_filename), path)))
+            # xscale/yscale: 'min, dmax'
+            field_data = get_column(os.path.join(_project_path, replica, _h5_filename), path)
+            data = json.dumps([ { 'x':float(x), 'y':float(y) } for x,y in enumerate(field_data) ])
+            offset = 0.1*numpy.mean(field_data)
+            ymin = float(numpy.min(field_data))-offset
+            ymax = float(numpy.max(field_data))+offset
+            xmin = float(0)
+            xmax = float(len(field_data))
+            return render_template_string(_PLOT_TEMPLATE, data=data, xlabel='Frame', ylabel=path, xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax)
     else:
         return render_template_string(_INDEX_TEMPLATE, replicas=_config['replicas'].keys())
 
@@ -125,8 +132,8 @@ var data = {{ data }};
 /* Sizing and scales. */
 var w = 800,
     h = 600,
-    x = pv.Scale.linear(0, 200).range(0, w),
-    y = pv.Scale.linear(0, 100).range(0, h);
+    x = pv.Scale.linear({{xmin}}, {{xmax}}).range(0, w),
+    y = pv.Scale.linear({{ymin}}, {{ymax}}).range(0, h);
     
 /* The root panel. */
 var vis = new pv.Panel()
@@ -143,7 +150,7 @@ vis.add(pv.Rule)
     .bottom(y)
     .strokeStyle(function(d) d ? "#eee" : "#000")
   .anchor("left").add(pv.Label)
-    .visible(function(d) d > 0 && d < 1)
+    .visible(function(d) d >= {{ymin}} && d <= {{ymax}})
     .text(y.tickFormat);
 
 /* X-axis and ticks. */
@@ -152,7 +159,7 @@ vis.add(pv.Rule)
     .left(x)
     .strokeStyle(function(d) d ? "#eee" : "#000")
   .anchor("bottom").add(pv.Label)
-    .visible(function(d) d > 0 && d < 100)
+    .visible(function(d) d >= {{xmin}} && d <= {{xmax}})
     .text(x.tickFormat);
 
 /* The dot plot! */
