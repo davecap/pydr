@@ -493,7 +493,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
             if job.replica_id is not None:
                 r = self.replicas[job.replica_id]
                 slog.error('Job ending while a replica %s is in state %s' % (str(r.id), r.status))
-                if r.status == Replica.RUNNING:
+                if r.status == Replica.RUNNING or r.status == Replica.STOPPED:
                     slog.error('Ending and stopping replica %s!' % str(r.id))
                     r.stop(1)
                 job.replica_id = None
@@ -588,7 +588,8 @@ class Replica(Pyro.core.ObjBase):
         if return_code != 0:
             log.error('Replica %s-%s returned non-zero code (%s)' % (str(self.id), str(self.sequence), return_code))
             self.status = Replica.STOPPED
-        else:
+        elif self.status == Replica.RUNNING:
+            # if the return code is 0 and the replica was running, set it to ready
             self.status = self.READY
         self.start_time = None
         self.timeout_time = None
