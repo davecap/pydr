@@ -340,7 +340,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
                 self.replicas[r.id] = r
             else:
                 self.replicas[r_id].properties = r_properties
-            if 'status' in r_properties and r_properties['status'].lower() is 'stopped':
+            if 'status' in r_properties and r_properties['status'].lower() == Replica.STOPPED:
                 # This prevents the replica from being run
                 slog.info('Disabling replica %s' % str(r_id))
                 self.replicas[r.id].status = Replica.STOPPED
