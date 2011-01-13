@@ -342,6 +342,7 @@ class Manager(Pyro.core.SynchronizedObjBase):
                 self.replicas[r_id].properties = r_properties
             if 'enabled' in r_properties and not r_properties['enabled']:
                 # This prevents the replica from being run
+                slog.info('Disabling replica %s' % str(r_id))
                 self.replicas[r.id].status = Replica.STOPPED
     
     def force_reset(self):
