@@ -82,7 +82,8 @@ def main():
             print "Could not reset stopped jobs!"
     
     if options.show_all_replicas:
-        for r in replicas.values():
+        sorted_items = sorted(replicas.iteritems(), key=lambda (k,v): int(k))
+        for k,r in sorted_items:
             try:
                 job = [ j for j in jobs if j.id == r.job_id ][0]
                 job = job.id
