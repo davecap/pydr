@@ -2,13 +2,8 @@
 
 import os
 import optparse
-from configobj import ConfigObj, flatten_errors
-from validate import Validator
-
 import Pyro.core
-from Pyro.errors import ProtocolError
-
-from pydr import setup_config, Replica, Job, Manager
+from pydr import setup_config, Replica
 
 def main():    
     usage = """
@@ -53,12 +48,23 @@ def main():
     server._setTimeout(1)
 
     props = server.get_manager_properties()
-    print "Connected to server"
+    print "Connected to: %s server at %s" % (config['title'], server_uri)
+
     for k,v in props.items():
         print "%s %s" % (k, v)
-    
+        
     replicas = server.get_all_replicas()
     jobs = server.get_all_jobs()
+    
+    counts = { }
+    for r in replicas:
+        if r.status in counts:
+            counts[r.status].append(r)
+        else:
+            counts[r.status] = [r]
+    
+    for k,v in counts.items():
+        print "%s: %d/%d" % (k.upper(), len(v), len(replicas))
     
     if options.enable_autosubmit:
         print "Enabling autosubmit"
