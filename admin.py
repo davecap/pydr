@@ -13,6 +13,7 @@ def main():
     
     parser = optparse.OptionParser(usage)
     parser.add_option("-c", "--config", dest="config_file", default="config.ini", help="Config file [default: %default]")
+    parser.add_option("-q", dest="quiet", default=False, action="store_true", help="Quiet mode [default: %default]")
     # show replicas
     parser.add_option("-l", dest="show_all_replicas", default=False, action="store_true", help="Show all replicas [default: %default]")
     # show jobs
@@ -38,7 +39,8 @@ def main():
     
     # get the server URI from the hostfile
     if not os.path.exists(hostfile):
-        print "No hostfile found at %s, exiting!" % hostfile
+        if not options.quiet:
+            print "No hostfile found at %s, exiting!" % hostfile
         return
     
     f = open(hostfile, 'r')
@@ -49,7 +51,7 @@ def main():
     server._setTimeout(1)
 
     props = server.get_manager_properties()
-    print "Connected to: %s server at %s" % (config['title'], server_uri)
+    print "\nConnected to: %s server at %s" % (config['title'], server_uri)
 
     for k,v in props.items():
         print "%s %s" % (k, v)
@@ -126,6 +128,8 @@ def main():
                 print "Could not change the replica status!"
         else:
             print "Invalid replica id %s" % replica_id
+
+    print "\n"
     
 if __name__=='__main__':
     main()
