@@ -3,6 +3,7 @@
 import os
 import optparse
 import Pyro.core
+# Unused classes must be imported due to pickling
 from pydr import setup_config, Replica, Job
 
 def main():    
@@ -56,9 +57,9 @@ def main():
     replicas = server.get_all_replicas()
     jobs = server.get_all_jobs()
     
-    counts = { }
+    counts = {}
     for r in replicas:
-        if r.status in counts:
+        if r.status in counts.keys():
             counts[r.status].append(r)
         else:
             counts[r.status] = [r]
