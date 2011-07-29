@@ -3,7 +3,7 @@
 import os
 import optparse
 import Pyro.core
-from pydr import setup_config, Replica
+from pydr import setup_config, Replica, Job
 
 def main():    
     usage = """
