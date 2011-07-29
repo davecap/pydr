@@ -59,14 +59,10 @@ def main():
     replicas = server.get_all_replicas()
     jobs = server.get_all_jobs()
     
-    counts = {}
-    for r_id, r in replicas.items():
-        if r.status in counts.keys():
-            counts[r.status].append(r)
-        else:
-            counts[r.status] = [r]
-    
-    for k,v in counts.items():
+    replica_groups = {Replica.RUNNING: [], Replica.READY: [], Replica.STOPPED: []}
+    for r_id,r in replicas.items():
+        replica_groups[r.status].append(r)
+    for k,v in replica_groups.items():
         print "%s: %d/%d" % (k.upper(), len(v), len(replicas))
     
     if options.enable_autosubmit:
