@@ -129,7 +129,7 @@ def main():
         else:
             print "Invalid replica id %s" % replica_id
 
-    print "\n"
+    print ""
     
 if __name__=='__main__':
     main()
