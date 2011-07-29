@@ -58,7 +58,7 @@ def main():
     jobs = server.get_all_jobs()
     
     counts = {}
-    for r in replicas:
+    for r_id, r in replicas.items():
         if r.status in counts.keys():
             counts[r.status].append(r)
         else:
