@@ -365,10 +365,14 @@ class Manager(Pyro.core.SynchronizedObjBase):
                     'autosubmit': self.config['manager']['autosubmit'],
         }
     
-    def enable_autosubmit(self):
-        slog.info("Enabling autosubmit!")
-        self.config['manager']['autosubmit'] = True
-    
+    def toggle_autosubmit(self):
+        if self.config['manager']['autosubmit']:
+            slog.info("Disabling autosubmit!")
+            self.config['manager']['autosubmit'] = False
+        else:
+            slog.info("Enabling autosubmit!")
+            self.config['manager']['autosubmit'] = True
+
     def get_all_replicas(self):
         pickle_replicas = {}
         for r_id, r in self.replicas.iteritems():

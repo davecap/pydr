@@ -25,7 +25,7 @@ def main():
     # reset stopped jobs
     parser.add_option("--reset-jobs", dest="reset_jobs", default=False, action="store_true", help="Reset stopped jobs [default: %default]")
     # enable autosubmit
-    parser.add_option("-a", dest="enable_autosubmit", default=False, action="store_true", help="Enable autosubmit [default: %default]")    
+    parser.add_option("-a", dest="toggle_autosubmit", default=False, action="store_true", help="Toggle autosubmit [default: %default]")    
     # force reset
     parser.add_option("--force-reset", dest="force_reset", default=False, action="store_true", help="Force reset of all replicas and jobs in case of a crash [default: %default]")
     parser.add_option("--ready-stopped", dest="ready_stopped", default=False, action="store_true", help="Set all stopped replicas to ready [default: %default]")
@@ -64,10 +64,10 @@ def main():
         replica_groups[r.status].append(r)
     for k,v in replica_groups.items():
         print "%s: %d/%d" % (k.upper(), len(v), len(replicas))
-    
-    if options.enable_autosubmit:
+
+    if options.toggle_autosubmit:
         print "Enabling autosubmit"
-        server.enable_autosubmit()
+        server.toggle_autosubmit()
     
     if options.force_reset:
         print "Resetting all replicas and jobs!!"
