@@ -43,6 +43,7 @@ def main():
             print "No hostfile found at %s, exiting!" % hostfile
         return
     
+    print "\nHostfile: %s" % (hostfile)
     f = open(hostfile, 'r')
     server_uri = f.readline()
     f.close()
